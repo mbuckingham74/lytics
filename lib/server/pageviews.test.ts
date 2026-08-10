@@ -17,6 +17,7 @@ import {
   getRankedDeviceTypesByVisitors,
   getRankedEntryPages,
   getRankedExitPages,
+  getRankedOperatingSystemsByVisitors,
   getRankedPages,
   getRankedPagesBySessions,
   getRankedRegionsByVisitors,
@@ -31,6 +32,7 @@ import type {
   RankedCityByVisitors,
   RankedCountryByVisitors,
   RankedDeviceTypeByVisitors,
+  RankedOperatingSystemByVisitors,
   RankedRegionByVisitors,
   RankedReferrerBySessions,
 } from "./pageviews";
@@ -3530,6 +3532,140 @@ test("rejects invalid device-type-ranking dates and ranges", () => {
       {
         message:
           "Ranked device types by visitors start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks stored operating systems by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, operatingSystemName, occurredAt] of [
+      [siteId, "windows-repeat", "Windows", "2026-08-09T12:05:00.000Z"],
+      [siteId, "windows-repeat", "Windows", "2026-08-09T12:06:00.000Z"],
+      [siteId, "shared", "Windows", "2026-08-09T12:10:00.000Z"],
+      [siteId, "windows-only", "Windows", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "macOS", "2026-08-09T12:20:00.000Z"],
+      [siteId, "mac-only", "macOS", "2026-08-09T12:25:00.000Z"],
+      [siteId, "linux-one", "Linux", "2026-08-09T12:30:00.000Z"],
+      [siteId, "linux-two", "Linux", "2026-08-09T12:31:00.000Z"],
+      [siteId, "android-one", "Android", "2026-08-09T12:32:00.000Z"],
+      [siteId, "android-two", "Android", "2026-08-09T12:33:00.000Z"],
+      [siteId, "lower-one", "android", "2026-08-09T12:34:00.000Z"],
+      [siteId, "lower-two", "android", "2026-08-09T12:35:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:40:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:41:00.000Z"],
+      [siteId, "unknown-two", null, "2026-08-09T12:45:00.000Z"],
+      [siteId, "start-boundary", "FreeBSD", "2026-08-09T12:00:00.000Z"],
+      [siteId, "end-boundary", "iOS", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "Chrome OS", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "Windows", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "Windows", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        technology: {
+          browserName: null,
+          deviceType: null,
+          operatingSystemName,
+        },
+      });
+    }
+
+    const rankedOperatingSystems: RankedOperatingSystemByVisitors[] =
+      getRankedOperatingSystemsByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedOperatingSystems, [
+      { operatingSystemName: "Windows", visitors: 3 },
+      { operatingSystemName: null, visitors: 2 },
+      { operatingSystemName: "Android", visitors: 2 },
+      { operatingSystemName: "Linux", visitors: 2 },
+      { operatingSystemName: "android", visitors: 2 },
+      { operatingSystemName: "macOS", visitors: 2 },
+      { operatingSystemName: "FreeBSD", visitors: 1 },
+    ]);
+  });
+});
+
+test("returns no ranked operating systems when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedOperatingSystemsByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid operating-system-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedOperatingSystemsByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message:
+          "Ranked operating systems by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedOperatingSystemsByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message:
+          "Ranked operating systems by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedOperatingSystemsByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked operating systems by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedOperatingSystemsByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked operating systems by visitors start time must be earlier than end time",
       },
     );
   });

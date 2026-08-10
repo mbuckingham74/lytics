@@ -82,6 +82,11 @@ export type RankedDeviceTypeByVisitors = {
   visitors: number;
 };
 
+export type RankedOperatingSystemByVisitors = {
+  operatingSystemName: string | null;
+  visitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -1257,6 +1262,53 @@ export function getRankedDeviceTypesByVisitors(
     .all(input.siteId, startAt, endAt)
     .map((row) => ({
       deviceType: row.device_type as string | null,
+      visitors: row.visitors as number,
+    }));
+}
+
+export function getRankedOperatingSystemsByVisitors(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedOperatingSystemByVisitors[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked operating systems by visitors start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked operating systems by visitors end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked operating systems by visitors start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT
+        operating_system_name,
+        count(DISTINCT visitor_id) AS visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY operating_system_name COLLATE BINARY
+      ORDER BY
+        visitors DESC,
+        operating_system_name IS NOT NULL ASC,
+        operating_system_name COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      operatingSystemName: row.operating_system_name as string | null,
       visitors: row.visitors as number,
     }));
 }
