@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import {
+  createReportCsvHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -84,6 +85,12 @@ export default async function Pages({ searchParams }: PagesProps) {
     ...selection,
     timeZone,
   });
+  const csvHref = createReportCsvHref({
+    view: "pages",
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset,
+  });
   const rankings = [
     {
       title: "Pages",
@@ -120,6 +127,14 @@ export default async function Pages({ searchParams }: PagesProps) {
           </div>
 
           <div className="header-actions" aria-label="Pages controls">
+            <a
+              className="csv-export-link"
+              href={csvHref}
+              download
+              aria-label="Export Pages as CSV"
+            >
+              CSV
+            </a>
             <ReportingRangeSelector
               selectedPreset={rangePreset}
               selectedSiteId={site.id}

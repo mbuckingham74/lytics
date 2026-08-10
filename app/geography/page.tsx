@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import {
+  createReportCsvHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -150,6 +151,12 @@ export default async function Geography({ searchParams }: GeographyProps) {
     ...selection,
     timeZone,
   });
+  const csvHref = createReportCsvHref({
+    view: "geography",
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset,
+  });
   const rankings = [
     {
       title: "Countries",
@@ -195,6 +202,14 @@ export default async function Geography({ searchParams }: GeographyProps) {
           </div>
 
           <div className="header-actions" aria-label="Geography controls">
+            <a
+              className="csv-export-link"
+              href={csvHref}
+              download
+              aria-label="Export Geography as CSV"
+            >
+              CSV
+            </a>
             <ReportingRangeSelector
               selectedPreset={rangePreset}
               selectedSiteId={site.id}

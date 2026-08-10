@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import {
+  createReportCsvHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -109,6 +110,12 @@ export default async function Technology({ searchParams }: TechnologyProps) {
     ...selection,
     timeZone,
   });
+  const csvHref = createReportCsvHref({
+    view: "technology",
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset,
+  });
   const rankings = [
     {
       title: "Browsers",
@@ -163,6 +170,14 @@ export default async function Technology({ searchParams }: TechnologyProps) {
           </div>
 
           <div className="header-actions" aria-label="Technology controls">
+            <a
+              className="csv-export-link"
+              href={csvHref}
+              download
+              aria-label="Export Technology as CSV"
+            >
+              CSV
+            </a>
             <ReportingRangeSelector
               selectedPreset={rangePreset}
               selectedSiteId={site.id}

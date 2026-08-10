@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createOverviewHref,
+  createReportCsvHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -127,4 +128,50 @@ test("builds every canonical Overview href permutation in approved order", () =>
     }),
     "/api/overview.csv?site=2&range=90d",
   );
+});
+
+test("builds every canonical report CSV href permutation in deterministic order", () => {
+  for (const view of [
+    "pages",
+    "referrers",
+    "geography",
+    "technology",
+  ] as const) {
+    assert.equal(
+      createReportCsvHref({
+        view,
+        siteId: 1,
+        firstSiteId: 1,
+        rangePreset: "7d",
+      }),
+      `/api/report.csv?view=${view}`,
+    );
+    assert.equal(
+      createReportCsvHref({
+        view,
+        siteId: 2,
+        firstSiteId: 1,
+        rangePreset: "7d",
+      }),
+      `/api/report.csv?view=${view}&site=2`,
+    );
+    assert.equal(
+      createReportCsvHref({
+        view,
+        siteId: 1,
+        firstSiteId: 1,
+        rangePreset: "today",
+      }),
+      `/api/report.csv?view=${view}&range=today`,
+    );
+    assert.equal(
+      createReportCsvHref({
+        view,
+        siteId: 3,
+        firstSiteId: 1,
+        rangePreset: "90d",
+      }),
+      `/api/report.csv?view=${view}&site=3&range=90d`,
+    );
+  }
 });

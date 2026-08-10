@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import {
+  createReportCsvHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -92,6 +93,12 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
     startAt: range.startAt,
     endAt: range.endAt,
   });
+  const csvHref = createReportCsvHref({
+    view: "referrers",
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset,
+  });
   const maximumSessions = Math.max(
     0,
     ...referrers.map((referrer) => referrer.sessions),
@@ -112,6 +119,14 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
           </div>
 
           <div className="header-actions" aria-label="Referrers controls">
+            <a
+              className="csv-export-link"
+              href={csvHref}
+              download
+              aria-label="Export Referrers as CSV"
+            >
+              CSV
+            </a>
             <ReportingRangeSelector
               selectedPreset={rangePreset}
               selectedSiteId={site.id}

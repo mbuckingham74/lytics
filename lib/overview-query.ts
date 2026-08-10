@@ -1,4 +1,9 @@
 export type OverviewRangePreset = "today" | "7d" | "30d" | "90d";
+export type ReportCsvView =
+  | "pages"
+  | "referrers"
+  | "geography"
+  | "technology";
 
 export type OverviewSiteRecord = {
   id: number;
@@ -100,4 +105,24 @@ export function createOverviewHref(input: {
 
   const query = parameters.toString();
   return query ? `${pathname}?${query}` : pathname;
+}
+
+export function createReportCsvHref(input: {
+  view: ReportCsvView;
+  siteId: number;
+  firstSiteId: number;
+  rangePreset: OverviewRangePreset;
+}): string {
+  const parameters = new URLSearchParams();
+  parameters.set("view", input.view);
+
+  if (input.siteId !== input.firstSiteId) {
+    parameters.set("site", String(input.siteId));
+  }
+
+  if (input.rangePreset !== "7d") {
+    parameters.set("range", input.rangePreset);
+  }
+
+  return `/api/report.csv?${parameters.toString()}`;
 }
