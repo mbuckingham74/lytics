@@ -72,6 +72,11 @@ export type RankedCityByVisitors = {
   visitors: number;
 };
 
+export type RankedBrowserByVisitors = {
+  browserName: string | null;
+  visitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -1153,6 +1158,53 @@ export function getRankedCitiesByVisitors(
       regionCode: row.region_code as string | null,
       regionName: row.selected_region_name as string | null,
       cityName: row.city_name as string | null,
+      visitors: row.visitors as number,
+    }));
+}
+
+export function getRankedBrowsersByVisitors(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedBrowserByVisitors[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked browsers by visitors start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked browsers by visitors end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked browsers by visitors start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT
+        browser_name,
+        count(DISTINCT visitor_id) AS visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY browser_name COLLATE BINARY
+      ORDER BY
+        visitors DESC,
+        browser_name IS NOT NULL ASC,
+        browser_name COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      browserName: row.browser_name as string | null,
       visitors: row.visitors as number,
     }));
 }

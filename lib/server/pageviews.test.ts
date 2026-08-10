@@ -11,6 +11,7 @@ import {
   getBounceRate,
   getPagesPerSession,
   getPageviewSummary,
+  getRankedBrowsersByVisitors,
   getRankedCitiesByVisitors,
   getRankedCountriesByVisitors,
   getRankedEntryPages,
@@ -25,6 +26,7 @@ import {
   recordPageview,
 } from "./pageviews";
 import type {
+  RankedBrowserByVisitors,
   RankedCityByVisitors,
   RankedCountryByVisitors,
   RankedRegionByVisitors,
@@ -3268,6 +3270,134 @@ test("rejects invalid city-ranking dates and ranges", () => {
       {
         message:
           "Ranked cities by visitors start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks stored browser names by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, browserName, occurredAt] of [
+      [siteId, "chrome-repeat", "Chrome", "2026-08-09T12:05:00.000Z"],
+      [siteId, "chrome-repeat", "Chrome", "2026-08-09T12:06:00.000Z"],
+      [siteId, "shared", "Chrome", "2026-08-09T12:10:00.000Z"],
+      [siteId, "chrome-only", "Chrome", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "Safari", "2026-08-09T12:20:00.000Z"],
+      [siteId, "safari-only", "Safari", "2026-08-09T12:25:00.000Z"],
+      [siteId, "firefox-one", "Firefox", "2026-08-09T12:30:00.000Z"],
+      [siteId, "firefox-two", "Firefox", "2026-08-09T12:35:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:40:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:41:00.000Z"],
+      [siteId, "unknown-two", null, "2026-08-09T12:45:00.000Z"],
+      [siteId, "start-boundary", "Edge", "2026-08-09T12:00:00.000Z"],
+      [siteId, "lowercase-name", "chrome", "2026-08-09T12:50:00.000Z"],
+      [siteId, "end-boundary", "Opera", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "Brave", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "Chrome", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "Chrome", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        technology: {
+          browserName,
+          deviceType: null,
+          operatingSystemName: null,
+        },
+      });
+    }
+
+    const rankedBrowsers: RankedBrowserByVisitors[] =
+      getRankedBrowsersByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedBrowsers, [
+      { browserName: "Chrome", visitors: 3 },
+      { browserName: null, visitors: 2 },
+      { browserName: "Firefox", visitors: 2 },
+      { browserName: "Safari", visitors: 2 },
+      { browserName: "Edge", visitors: 1 },
+      { browserName: "chrome", visitors: 1 },
+    ]);
+  });
+});
+
+test("returns no ranked browsers when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedBrowsersByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid browser-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedBrowsersByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message: "Ranked browsers by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedBrowsersByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked browsers by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedBrowsersByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked browsers by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedBrowsersByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked browsers by visitors start time must be earlier than end time",
       },
     );
   });
