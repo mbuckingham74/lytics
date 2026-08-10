@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import {
+  createOverviewHref,
   overviewRangePresets,
   resolveOverviewRangePreset,
   resolveOverviewSite,
@@ -145,6 +146,12 @@ export default async function Home({ searchParams }: HomeProps) {
     timeZone,
     nowAt,
   });
+  const csvHref = createOverviewHref({
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset,
+    pathname: "/api/overview.csv",
+  });
   const overviewMetrics = [
     { label: "Unique visitors", value: formatCount(report.uniqueVisitors) },
     { label: "Sessions", value: formatCount(report.sessions) },
@@ -234,7 +241,14 @@ export default async function Home({ searchParams }: HomeProps) {
               <span className="live-dot" aria-hidden="true" />
               {formatCount(report.realtimeVisitors)} live now
             </span>
-            <button type="button" disabled aria-label="Export overview as CSV">CSV</button>
+            <a
+              className="csv-export-link"
+              href={csvHref}
+              download
+              aria-label="Export overview as CSV"
+            >
+              CSV
+            </a>
             <ReportingRangeSelector
               selectedPreset={rangePreset}
               selectedSiteId={site.id}

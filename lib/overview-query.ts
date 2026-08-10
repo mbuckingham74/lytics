@@ -85,7 +85,9 @@ export function createOverviewHref(input: {
   siteId: number;
   firstSiteId: number;
   rangePreset: OverviewRangePreset;
+  pathname?: string;
 }): string {
+  const pathname = input.pathname ?? "/";
   const parameters = new URLSearchParams();
 
   if (input.siteId !== input.firstSiteId) {
@@ -97,5 +99,5 @@ export function createOverviewHref(input: {
   }
 
   const query = parameters.toString();
-  return query ? `/?${query}` : "/";
+  return query ? `${pathname}?${query}` : pathname;
 }

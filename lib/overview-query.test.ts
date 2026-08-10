@@ -109,4 +109,22 @@ test("builds every canonical Overview href permutation in approved order", () =>
     createOverviewHref({ siteId: 2, firstSiteId: 1, rangePreset: "90d" }),
     "/?site=2&range=90d",
   );
+  assert.equal(
+    createOverviewHref({
+      siteId: 1,
+      firstSiteId: 1,
+      rangePreset: "7d",
+      pathname: "/api/overview.csv",
+    }),
+    "/api/overview.csv",
+  );
+  assert.equal(
+    createOverviewHref({
+      siteId: 2,
+      firstSiteId: 1,
+      rangePreset: "90d",
+      pathname: "/api/overview.csv",
+    }),
+    "/api/overview.csv?site=2&range=90d",
+  );
 });
