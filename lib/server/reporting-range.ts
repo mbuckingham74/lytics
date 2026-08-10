@@ -12,9 +12,20 @@ type ReportingRangeInput = {
   timeZone: string;
 };
 
+type RecentCalendarSelectionInput = {
+  nowAt: Date;
+  timeZone: string;
+  dayCount: number;
+};
+
 export type ReportingRange = {
   startAt: Date;
   endAt: Date;
+};
+
+export type CalendarDateSelection = {
+  startDate: string;
+  endDate: string;
 };
 
 const calendarDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -177,6 +188,82 @@ function localMidnightToInstant(
   throw new Error("Calendar date cannot be resolved in the supplied time zone");
 }
 
+function createZonedDateTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-US-u-ca-iso8601-nu-latn", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+}
+
+function subtractCalendarDays(date: CalendarDate, dayCount: number): CalendarDate {
+  const cursor = new Date(utcTimestamp(date));
+  cursor.setUTCDate(cursor.getUTCDate() - dayCount);
+
+  return {
+    year: cursor.getUTCFullYear(),
+    month: cursor.getUTCMonth() + 1,
+    day: cursor.getUTCDate(),
+  };
+}
+
+function formatCalendarDate(date: CalendarDate): string {
+  if (
+    !Number.isInteger(date.year) ||
+    date.year < 1 ||
+    date.year > 9999 ||
+    !Number.isInteger(date.month) ||
+    !Number.isInteger(date.day)
+  ) {
+    throw new Error("Calendar selection falls outside supported YYYY-MM-DD dates");
+  }
+
+  return [
+    String(date.year).padStart(4, "0"),
+    String(date.month).padStart(2, "0"),
+    String(date.day).padStart(2, "0"),
+  ].join("-");
+}
+
+export function createRecentCalendarSelection(
+  input: RecentCalendarSelectionInput,
+): CalendarDateSelection {
+  if (!(input.nowAt instanceof Date) || !Number.isFinite(input.nowAt.getTime())) {
+    throw new Error("nowAt must be a valid Date");
+  }
+
+  if (!Number.isSafeInteger(input.dayCount) || input.dayCount <= 0) {
+    throw new Error("dayCount must be a positive safe integer");
+  }
+
+  const canonicalTimeZone = canonicalizeTimeZone(input.timeZone);
+
+  if (!canonicalTimeZone) {
+    throw new Error("timeZone must be a valid IANA time zone");
+  }
+
+  const zonedNow = readZonedParts(
+    createZonedDateTimeFormatter(canonicalTimeZone),
+    input.nowAt,
+  );
+  const endDate = {
+    year: zonedNow.year,
+    month: zonedNow.month,
+    day: zonedNow.day,
+  };
+  const startDate = subtractCalendarDays(endDate, input.dayCount - 1);
+
+  return {
+    startDate: formatCalendarDate(startDate),
+    endDate: formatCalendarDate(endDate),
+  };
+}
+
 export function createReportingRange(input: ReportingRangeInput): ReportingRange {
   const startDate = parseCalendarDate(input.startDate, "startDate");
   const endDate = parseCalendarDate(input.endDate, "endDate");
@@ -191,16 +278,7 @@ export function createReportingRange(input: ReportingRangeInput): ReportingRange
     throw new Error("timeZone must be a valid IANA time zone");
   }
 
-  const formatter = new Intl.DateTimeFormat("en-US-u-ca-iso8601-nu-latn", {
-    timeZone: canonicalTimeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = createZonedDateTimeFormatter(canonicalTimeZone);
 
   return {
     startAt: localMidnightToInstant(startDate, formatter),

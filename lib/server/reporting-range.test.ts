@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createReportingRange, getReportingTimeZone } from "./reporting-range";
+import {
+  createRecentCalendarSelection,
+  createReportingRange,
+  getReportingTimeZone,
+} from "./reporting-range";
 
 test("reads, trims, and canonicalizes the reporting timezone only when called", () => {
   assert.equal(
@@ -102,4 +106,99 @@ test("rejects reversed ranges and invalid timezone names with stable errors", ()
     }),
     { message: "timeZone must be a valid IANA time zone" },
   );
+});
+
+test("creates an inclusive recent UTC calendar selection", () => {
+  assert.deepEqual(
+    createRecentCalendarSelection({
+      nowAt: new Date("2026-08-10T12:34:56.789Z"),
+      timeZone: "UTC",
+      dayCount: 7,
+    }),
+    { startDate: "2026-08-04", endDate: "2026-08-10" },
+  );
+});
+
+test("the same instant selects the correct current date in each timezone", () => {
+  const nowAt = new Date("2026-08-10T02:00:00.000Z");
+
+  assert.deepEqual(
+    createRecentCalendarSelection({ nowAt, timeZone: "UTC", dayCount: 7 }),
+    { startDate: "2026-08-04", endDate: "2026-08-10" },
+  );
+  assert.deepEqual(
+    createRecentCalendarSelection({
+      nowAt,
+      timeZone: "America/Los_Angeles",
+      dayCount: 7,
+    }),
+    { startDate: "2026-08-03", endDate: "2026-08-09" },
+  );
+});
+
+test("subtracts local calendar dates across Los Angeles spring-forward", () => {
+  assert.deepEqual(
+    createRecentCalendarSelection({
+      nowAt: new Date("2026-03-10T12:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
+      dayCount: 4,
+    }),
+    { startDate: "2026-03-07", endDate: "2026-03-10" },
+  );
+});
+
+test("handles month, year, and leap-day calendar boundaries", () => {
+  assert.deepEqual(
+    createRecentCalendarSelection({
+      nowAt: new Date("2026-01-02T12:00:00.000Z"),
+      timeZone: "UTC",
+      dayCount: 7,
+    }),
+    { startDate: "2025-12-27", endDate: "2026-01-02" },
+  );
+  assert.deepEqual(
+    createRecentCalendarSelection({
+      nowAt: new Date("2024-03-01T12:00:00.000Z"),
+      timeZone: "UTC",
+      dayCount: 3,
+    }),
+    { startDate: "2024-02-28", endDate: "2024-03-01" },
+  );
+});
+
+test("rejects invalid recent-calendar selection inputs with stable errors", () => {
+  assert.throws(
+    () => createRecentCalendarSelection({
+      nowAt: new Date(Number.NaN),
+      timeZone: "UTC",
+      dayCount: 7,
+    }),
+    { message: "nowAt must be a valid Date" },
+  );
+  assert.throws(
+    () => createRecentCalendarSelection({
+      nowAt: new Date("2026-08-10T12:00:00.000Z"),
+      timeZone: "Not/A_Time_Zone",
+      dayCount: 7,
+    }),
+    { message: "timeZone must be a valid IANA time zone" },
+  );
+
+  for (const dayCount of [
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(
+      () => createRecentCalendarSelection({
+        nowAt: new Date("2026-08-10T12:00:00.000Z"),
+        timeZone: "UTC",
+        dayCount,
+      }),
+      { message: "dayCount must be a positive safe integer" },
+    );
+  }
 });
