@@ -18,12 +18,14 @@ type SiteSelectorProps = {
   options: SiteSelectorOption[];
   selectedSiteId: number;
   pathname?: string;
+  preserveRange?: boolean;
 };
 
 export function SiteSelector({
   options,
   selectedSiteId,
   pathname = "/",
+  preserveRange = true,
 }: SiteSelectorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -39,9 +41,9 @@ export function SiteSelector({
   function handleChange(value: string): void {
     setSelectedValue(value);
     const selectedId = Number(value);
-    const rangePreset = resolveOverviewRangePreset(
-      searchParams.getAll("range"),
-    );
+    const rangePreset = preserveRange
+      ? resolveOverviewRangePreset(searchParams.getAll("range"))
+      : "7d";
     const href = createOverviewHref({
       siteId: selectedId,
       firstSiteId: options[0].id,

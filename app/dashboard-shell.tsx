@@ -9,18 +9,24 @@ const navigationItems = [
   { label: "Referrers", href: "/referrers" },
   { label: "Geography" },
   { label: "Technology" },
-  { label: "Realtime" },
+  { label: "Realtime", href: "/realtime" },
   { label: "Settings", href: "/settings" },
 ] as const;
 
 type DashboardShellProps = {
-  activeSection: "Overview" | "Pages" | "Referrers" | "Settings";
+  activeSection:
+    | "Overview"
+    | "Pages"
+    | "Referrers"
+    | "Realtime"
+    | "Settings";
   children: ReactNode;
   siteCaption?: string;
   siteName?: string;
   siteOptions?: SiteSelectorOption[];
   selectedSiteId?: number;
   siteSelectorPathname?: string;
+  siteSelectorPreserveRange?: boolean;
 };
 
 export function DashboardShell({
@@ -31,6 +37,7 @@ export function DashboardShell({
   siteOptions,
   selectedSiteId,
   siteSelectorPathname = "/",
+  siteSelectorPreserveRange = true,
 }: DashboardShellProps) {
   return (
     <div className="dashboard-shell">
@@ -42,6 +49,7 @@ export function DashboardShell({
             options={siteOptions}
             selectedSiteId={selectedSiteId}
             pathname={siteSelectorPathname}
+            preserveRange={siteSelectorPreserveRange}
           />
         ) : (
           <button className="site-selector" type="button" aria-label="Select website" disabled>

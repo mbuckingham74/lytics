@@ -331,6 +331,41 @@ h1 {
   box-shadow: 0 0 0 3px rgb(70 213 140 / 12%);
 }
 
+.realtime-section {
+  max-width: 720px;
+  padding-top: 30px;
+}
+
+.realtime-panel {
+  padding: 34px;
+  border: 1px solid #222724;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 16% 20%, rgb(72 199 135 / 8%), transparent 35%),
+    #101311;
+}
+
+.realtime-panel .realtime-status {
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 9px;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.realtime-panel .live-dot {
+  width: 9px;
+  height: 9px;
+}
+
+.realtime-description {
+  max-width: 520px;
+  margin: 18px 0 0;
+  color: #858e89;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 .overview-section {
   padding-top: 24px;
 }
@@ -1057,6 +1092,14 @@ h1 {
 
   .ranking-panel {
     padding: 15px 12px 10px;
+  }
+
+  .realtime-panel {
+    padding: 24px 18px;
+  }
+
+  .realtime-panel .realtime-status {
+    font-size: 19px;
   }
 
   .ranking-table th,
