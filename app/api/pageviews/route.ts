@@ -1,3 +1,5 @@
+import { getClientIp } from "../../../lib/server/client-ip";
+import { resolveGeography } from "../../../lib/server/geolocation";
 import { recordPageview } from "../../../lib/server/pageviews";
 import { getRuntimeDatabase } from "../../../lib/server/runtime-database";
 import { findSiteByDomain } from "../../../lib/server/sites";
@@ -218,13 +220,24 @@ export async function POST(request: Request): Promise<Response> {
     return resolvedError("Invalid request body", 400, corsOrigin);
   }
 
+  const clientIp = getClientIp(request.headers);
+
+  if (clientIp === null) {
+    return resolvedError("Invalid client IP", 400, corsOrigin);
+  }
+
+  const occurredAt = new Date();
+
   try {
+    const geography = await resolveGeography(clientIp);
+
     recordPageview(resolution.database, {
       siteId: resolution.siteId,
       visitorId: body.visitorId,
       path: body.path,
       referrer: body.referrer,
-      occurredAt: new Date(),
+      occurredAt,
+      geography,
     });
   } catch {
     return resolvedError("Unable to record pageview", 500, corsOrigin);

@@ -4,18 +4,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { resetGeolocationReaderForTests } from "../../../lib/server/geolocation";
 import { closeRuntimeDatabase, getRuntimeDatabase } from "../../../lib/server/runtime-database";
 import { registerSite } from "../../../lib/server/sites";
 import { OPTIONS, POST } from "./route";
 
 const registeredOrigin = "https://personal.example";
 const originalDatabasePath = process.env.LYTICS_DATABASE_PATH;
+const originalGeolocationPath = process.env.LYTICS_GEOLITE2_CITY_PATH;
+const cityFixturePath = join(
+  process.cwd(),
+  "lib/server/fixtures/GeoIP2-City-Test.mmdb",
+);
 
 function restoreDatabasePath(): void {
   if (originalDatabasePath === undefined) {
     delete process.env.LYTICS_DATABASE_PATH;
   } else {
     process.env.LYTICS_DATABASE_PATH = originalDatabasePath;
+  }
+}
+
+function restoreGeolocationPath(): void {
+  if (originalGeolocationPath === undefined) {
+    delete process.env.LYTICS_GEOLITE2_CITY_PATH;
+  } else {
+    process.env.LYTICS_GEOLITE2_CITY_PATH = originalGeolocationPath;
   }
 }
 
@@ -27,14 +41,18 @@ async function withRouteDatabase(
   const directory = mkdtempSync(join(tmpdir(), "lytics-pageview-route-"));
   const filePath = join(directory, "analytics.sqlite");
   closeRuntimeDatabase();
+  resetGeolocationReaderForTests();
   process.env.LYTICS_DATABASE_PATH = filePath;
+  process.env.LYTICS_GEOLITE2_CITY_PATH = cityFixturePath;
 
   try {
     const database = getRuntimeDatabase();
     await run(database, filePath);
   } finally {
     closeRuntimeDatabase();
+    resetGeolocationReaderForTests();
     restoreDatabasePath();
+    restoreGeolocationPath();
     rmSync(directory, { force: true, recursive: true });
   }
 }
@@ -56,10 +74,19 @@ function pageviewCount(database: ReturnType<typeof getRuntimeDatabase>): number 
 function postRequest(input: {
   body?: BodyInit | null;
   contentType?: string | null;
+  clientIp?: string | null;
+  headers?: HeadersInit;
   origin?: string;
   url?: string;
 } = {}): Request {
-  const headers = new Headers();
+  const headers = new Headers(input.headers);
+  const clientIp = input.clientIp === undefined
+    ? "81.2.69.142"
+    : input.clientIp;
+
+  if (clientIp !== null) {
+    headers.set("X-Real-IP", clientIp);
+  }
 
   if (input.origin !== undefined) {
     headers.set("Origin", input.origin);
@@ -113,6 +140,7 @@ async function assertJsonError(
 test("registered-origin preflight returns CORS headers without recording", async () => {
   await withRouteDatabase(async (database) => {
     registerPersonalSite(database);
+    delete process.env.LYTICS_GEOLITE2_CITY_PATH;
 
     const response = OPTIONS(
       new Request("http://lytics.test/api/pageviews", {
@@ -153,7 +181,17 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
 
     const row = database
       .prepare(`
-        SELECT site_id, visitor_id, path, referrer, occurred_at
+        SELECT
+          site_id,
+          visitor_id,
+          path,
+          referrer,
+          occurred_at,
+          country_code,
+          country_name,
+          region_code,
+          region_name,
+          city_name
         FROM pageviews
       `)
       .get();
@@ -163,16 +201,129 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
         visitorId: row?.visitor_id,
         path: row?.path,
         referrer: row?.referrer,
+        geography: {
+          countryCode: row?.country_code,
+          countryName: row?.country_name,
+          regionCode: row?.region_code,
+          regionName: row?.region_name,
+          cityName: row?.city_name,
+        },
       },
       {
         siteId,
         visitorId: "opaque visitor value",
         path: "/writing/hello",
         referrer: "https://source.example/article",
+        geography: {
+          countryCode: "GB",
+          countryName: "United Kingdom",
+          regionCode: "ENG",
+          regionName: "England",
+          cityName: "London",
+        },
       },
     );
     assert.ok((row?.occurred_at as number) >= before);
     assert.ok((row?.occurred_at as number) <= after);
+    assert.equal(JSON.stringify(row).includes("81.2.69.142"), false);
+  });
+});
+
+test("persists all-null geography for private and unmapped client IPs", async () => {
+  await withRouteDatabase(async (database) => {
+    registerPersonalSite(database);
+
+    for (const [index, clientIp] of ["192.168.1.10", "1.1.1.1"].entries()) {
+      const response = await POST(
+        postRequest({
+          origin: registeredOrigin,
+          contentType: "application/json",
+          clientIp,
+          body: jsonBody({ visitorId: `visitor-${index}`, path: "/" }),
+        }),
+      );
+
+      assert.equal(response.status, 204);
+      assertCors(response, registeredOrigin);
+    }
+
+    assert.deepEqual(
+      database
+        .prepare(`
+          SELECT
+            country_code,
+            country_name,
+            region_code,
+            region_name,
+            city_name
+          FROM pageviews
+          ORDER BY id ASC
+        `)
+        .all()
+        .map((row) => ({ ...row })),
+      [
+        {
+          country_code: null,
+          country_name: null,
+          region_code: null,
+          region_name: null,
+          city_name: null,
+        },
+        {
+          country_code: null,
+          country_name: null,
+          region_code: null,
+          region_name: null,
+          city_name: null,
+        },
+      ],
+    );
+  });
+});
+
+test("rejects missing, malformed, and ambiguous client IPs", async () => {
+  await withRouteDatabase(async (database) => {
+    registerPersonalSite(database);
+
+    for (const clientIp of [null, "not-an-ip", "203.0.113.4, 198.51.100.2"]) {
+      const response = await POST(
+        postRequest({
+          origin: registeredOrigin,
+          contentType: "application/json",
+          clientIp,
+          body: jsonBody({ visitorId: "visitor", path: "/" }),
+        }),
+      );
+
+      await assertJsonError(response, 400, "Invalid client IP");
+      assertCors(response, registeredOrigin);
+    }
+
+    assert.equal(pageviewCount(database), 0);
+  });
+});
+
+test("never substitutes alternative forwarding headers for X-Real-IP", async () => {
+  await withRouteDatabase(async (database) => {
+    registerPersonalSite(database);
+
+    const response = await POST(
+      postRequest({
+        origin: registeredOrigin,
+        contentType: "application/json",
+        clientIp: null,
+        headers: {
+          Forwarded: "for=81.2.69.142",
+          "X-Forwarded-For": "81.2.69.142",
+          "CF-Connecting-IP": "81.2.69.142",
+        },
+        body: jsonBody({ visitorId: "visitor", path: "/" }),
+      }),
+    );
+
+    await assertJsonError(response, 400, "Invalid client IP");
+    assertCors(response, registeredOrigin);
+    assert.equal(pageviewCount(database), 0);
   });
 });
 
@@ -368,6 +519,39 @@ test("rejects body and query attempts to select a site or timestamp", async () =
     }
 
     assert.equal(pageviewCount(database), 0);
+  });
+});
+
+test("geography failures return only the generic error without recording", async () => {
+  await withRouteDatabase(async (database, filePath) => {
+    registerPersonalSite(database);
+
+    for (const geolocationPath of [undefined, filePath]) {
+      resetGeolocationReaderForTests();
+
+      if (geolocationPath === undefined) {
+        delete process.env.LYTICS_GEOLITE2_CITY_PATH;
+      } else {
+        process.env.LYTICS_GEOLITE2_CITY_PATH = geolocationPath;
+      }
+
+      const response = await POST(
+        postRequest({
+          origin: registeredOrigin,
+          contentType: "application/json",
+          body: jsonBody({ visitorId: "visitor", path: "/" }),
+        }),
+      );
+      const responseText = await response.text();
+
+      assert.equal(response.status, 500);
+      assert.equal(responseText, '{"error":"Unable to record pageview"}');
+      assert.equal(responseText.includes("81.2.69.142"), false);
+      assert.equal(responseText.includes(filePath), false);
+      assert.equal(responseText.includes("LYTICS_GEOLITE2_CITY_PATH"), false);
+      assertCors(response, registeredOrigin);
+      assert.equal(pageviewCount(database), 0);
+    }
   });
 });
 
