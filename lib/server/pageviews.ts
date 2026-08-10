@@ -19,6 +19,11 @@ export type RankedPage = {
   pageviews: number;
 };
 
+export type RankedReferrer = {
+  referrer: string | null;
+  pageviews: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -162,6 +167,47 @@ export function getRankedPages(
     .all(input.siteId, startAt, endAt)
     .map((row) => ({
       path: row.path as string,
+      pageviews: row.pageviews as number,
+    }));
+}
+
+export function getRankedReferrers(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedReferrer[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Ranked referrers start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Ranked referrers end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked referrers start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT referrer, count(*) AS pageviews
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY referrer
+      ORDER BY
+        pageviews DESC,
+        referrer IS NOT NULL ASC,
+        referrer COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      referrer: row.referrer as string | null,
       pageviews: row.pageviews as number,
     }));
 }
