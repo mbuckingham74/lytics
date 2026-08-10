@@ -65,7 +65,7 @@ function initializeRegisteredSite(
   }).id;
 }
 
-test("creates exactly the five nullable geography columns", () => {
+test("creates exactly the approved nullable geography and technology columns", () => {
   withTemporaryDatabase((database) => {
     initializeSites(database);
     initializePageviews(database);
@@ -93,10 +93,13 @@ test("creates exactly the five nullable geography columns", () => {
         "region_code",
         "region_name",
         "city_name",
+        "browser_name",
+        "device_type",
+        "operating_system_name",
       ],
     );
     assert.deepEqual(
-      columns.slice(-5),
+      columns.slice(6, 11),
       [
         { name: "country_code", type: "TEXT", notNull: 0 },
         { name: "country_name", type: "TEXT", notNull: 0 },
@@ -105,7 +108,19 @@ test("creates exactly the five nullable geography columns", () => {
         { name: "city_name", type: "TEXT", notNull: 0 },
       ],
     );
+    assert.deepEqual(
+      columns.slice(-3),
+      [
+        { name: "browser_name", type: "TEXT", notNull: 0 },
+        { name: "device_type", type: "TEXT", notNull: 0 },
+        { name: "operating_system_name", type: "TEXT", notNull: 0 },
+      ],
+    );
     assert.equal(columns.some((column) => /ip/i.test(column.name)), false);
+    assert.equal(
+      columns.some((column) => /user.agent|user_agent|ua$/i.test(column.name)),
+      false,
+    );
   });
 });
 
@@ -138,14 +153,17 @@ test("initializes the pageviews table idempotently without losing rows", () => {
             "region_code",
             "region_name",
             "city_name",
+            "browser_name",
+            "device_type",
+            "operating_system_name",
           ].includes(row.name as string),
         ).length,
-      5,
+      8,
     );
   });
 });
 
-test("upgrades a pre-geography schema without changing rows or indexes", () => {
+test("upgrades a pre-enrichment schema without changing rows or indexes", () => {
   withTemporaryDatabase((database) => {
     initializeSites(database);
     const siteId = registerSite(database, {
@@ -205,6 +223,9 @@ test("upgrades a pre-geography schema without changing rows or indexes", () => {
         "region_code",
         "region_name",
         "city_name",
+        "browser_name",
+        "device_type",
+        "operating_system_name",
       ],
     );
     assert.deepEqual(
@@ -223,6 +244,9 @@ test("upgrades a pre-geography schema without changing rows or indexes", () => {
         region_code: null,
         region_name: null,
         city_name: null,
+        browser_name: null,
+        device_type: null,
+        operating_system_name: null,
       },
     );
     assert.equal(
@@ -256,6 +280,11 @@ test("records normalized pageview data and returns the persisted row", () => {
         regionName: "Washington",
         cityName: "Seattle",
       },
+      technology: {
+        browserName: "Chrome",
+        deviceType: "desktop",
+        operatingSystemName: "Windows",
+      },
     });
 
     assert.deepEqual(pageview, {
@@ -271,6 +300,11 @@ test("records normalized pageview data and returns the persisted row", () => {
         regionCode: "WA",
         regionName: "Washington",
         cityName: "Seattle",
+      },
+      technology: {
+        browserName: "Chrome",
+        deviceType: "desktop",
+        operatingSystemName: "Windows",
       },
     });
     assert.deepEqual(
@@ -289,7 +323,10 @@ test("records normalized pageview data and returns the persisted row", () => {
                 country_name,
                 region_code,
                 region_name,
-                city_name
+                city_name,
+                browser_name,
+                device_type,
+                operating_system_name
               FROM pageviews
             `,
           )
@@ -307,6 +344,9 @@ test("records normalized pageview data and returns the persisted row", () => {
         region_code: "WA",
         region_name: "Washington",
         city_name: "Seattle",
+        browser_name: "Chrome",
+        device_type: "desktop",
+        operating_system_name: "Windows",
       },
     );
   });
@@ -329,6 +369,11 @@ test("persists pageviews after the database is closed and reopened", () => {
         regionName: "England",
         cityName: "London",
       },
+      technology: {
+        browserName: "Mobile Safari",
+        deviceType: "mobile",
+        operatingSystemName: "iOS",
+      },
     });
 
     database.close();
@@ -350,7 +395,10 @@ test("persists pageviews after the database is closed and reopened", () => {
                   country_name,
                   region_code,
                   region_name,
-                  city_name
+                  city_name,
+                  browser_name,
+                  device_type,
+                  operating_system_name
                 FROM pageviews
               `,
             )
@@ -367,6 +415,9 @@ test("persists pageviews after the database is closed and reopened", () => {
           region_code: "ENG",
           region_name: "England",
           city_name: "London",
+          browser_name: "Mobile Safari",
+          device_type: "mobile",
+          operating_system_name: "iOS",
         },
       );
     } finally {
@@ -475,6 +526,74 @@ test("stores omitted and partially null geography without normalization", () => 
           city_name: null,
         },
       ],
+    );
+  });
+});
+
+test("stores omitted and partially null technology without a raw user agent", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const occurredAt = new Date("2026-08-09T14:45:00.000Z");
+
+    const omitted = recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/without-technology",
+      occurredAt,
+    });
+    const partial = recordPageview(database, {
+      siteId,
+      visitorId: "visitor-2",
+      path: "/partial-technology",
+      occurredAt,
+      technology: {
+        browserName: "  Firefox  ",
+        deviceType: null,
+        operatingSystemName: "Linux",
+      },
+    });
+
+    assert.deepEqual(omitted.technology, {
+      browserName: null,
+      deviceType: null,
+      operatingSystemName: null,
+    });
+    assert.deepEqual(partial.technology, {
+      browserName: "  Firefox  ",
+      deviceType: null,
+      operatingSystemName: "Linux",
+    });
+    assert.deepEqual(
+      database
+        .prepare(`
+          SELECT
+            browser_name,
+            device_type,
+            operating_system_name
+          FROM pageviews
+          ORDER BY id ASC
+        `)
+        .all()
+        .map((row) => ({ ...row })),
+      [
+        {
+          browser_name: null,
+          device_type: null,
+          operating_system_name: null,
+        },
+        {
+          browser_name: "  Firefox  ",
+          device_type: null,
+          operating_system_name: "Linux",
+        },
+      ],
+    );
+    assert.equal(
+      database
+        .prepare("PRAGMA table_info(pageviews)")
+        .all()
+        .some((row) => /user.agent|user_agent|ua$/i.test(row.name as string)),
+      false,
     );
   });
 });

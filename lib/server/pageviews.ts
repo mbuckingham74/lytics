@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import type { Geography } from "./geolocation";
+import type { Technology } from "./technology";
 
 export type Pageview = {
   id: number;
@@ -10,6 +11,7 @@ export type Pageview = {
   referrer: string | null;
   occurredAt: Date;
   geography: Geography;
+  technology: Technology;
 };
 
 export type PageviewSummary = {
@@ -77,6 +79,7 @@ type RecordPageviewInput = {
   referrer?: string;
   occurredAt: Date;
   geography?: Geography;
+  technology?: Technology;
 };
 
 const geographyColumns = [
@@ -85,6 +88,12 @@ const geographyColumns = [
   "region_code",
   "region_name",
   "city_name",
+] as const;
+
+const technologyColumns = [
+  "browser_name",
+  "device_type",
+  "operating_system_name",
 ] as const;
 
 function toPageview(row: Record<string, unknown>): Pageview {
@@ -102,6 +111,11 @@ function toPageview(row: Record<string, unknown>): Pageview {
       regionName: row.region_name as string | null,
       cityName: row.city_name as string | null,
     },
+    technology: {
+      browserName: row.browser_name as string | null,
+      deviceType: row.device_type as string | null,
+      operatingSystemName: row.operating_system_name as string | null,
+    },
   };
 }
 
@@ -118,7 +132,10 @@ export function initializePageviews(database: DatabaseSync): void {
       country_name TEXT,
       region_code TEXT,
       region_name TEXT,
-      city_name TEXT
+      city_name TEXT,
+      browser_name TEXT,
+      device_type TEXT,
+      operating_system_name TEXT
     )
   `);
 
@@ -130,6 +147,12 @@ export function initializePageviews(database: DatabaseSync): void {
   );
 
   for (const column of geographyColumns) {
+    if (!existingColumns.has(column)) {
+      database.exec(`ALTER TABLE pageviews ADD COLUMN ${column} TEXT`);
+    }
+  }
+
+  for (const column of technologyColumns) {
     if (!existingColumns.has(column)) {
       database.exec(`ALTER TABLE pageviews ADD COLUMN ${column} TEXT`);
     }
@@ -150,6 +173,11 @@ export function recordPageview(
     regionCode: null,
     regionName: null,
     cityName: null,
+  };
+  const technology = input.technology ?? {
+    browserName: null,
+    deviceType: null,
+    operatingSystemName: null,
   };
 
   if (visitorId.length === 0) {
@@ -176,9 +204,12 @@ export function recordPageview(
         country_name,
         region_code,
         region_name,
-        city_name
+        city_name,
+        browser_name,
+        device_type,
+        operating_system_name
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING
         id,
         site_id,
@@ -190,7 +221,10 @@ export function recordPageview(
         country_name,
         region_code,
         region_name,
-        city_name
+        city_name,
+        browser_name,
+        device_type,
+        operating_system_name
     `)
     .get(
       input.siteId,
@@ -203,6 +237,9 @@ export function recordPageview(
       geography.regionCode,
       geography.regionName,
       geography.cityName,
+      technology.browserName,
+      technology.deviceType,
+      technology.operatingSystemName,
     );
 
   if (!row) {
