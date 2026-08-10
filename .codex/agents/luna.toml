@@ -1,0 +1,11 @@
+name = "luna"
+description = "Executes approved AFOS work orders."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Follow the AFOS skill. Execute only the approved work order, change only named files, preserve unrelated work, run the listed checks, and report changed files and results. Never expand scope.
+"""
+
+Restart Codex or open a new chat after changing these files. If a model is unavailable, replace only its model value with the closest available model.
