@@ -53,6 +53,14 @@ export type RankedCountryByVisitors = {
   visitors: number;
 };
 
+export type RankedRegionByVisitors = {
+  countryCode: string | null;
+  countryName: string | null;
+  regionCode: string | null;
+  regionName: string | null;
+  visitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -968,6 +976,68 @@ export function getRankedCountriesByVisitors(
     .map((row) => ({
       countryCode: row.country_code as string | null,
       countryName: row.selected_country_name as string | null,
+      visitors: row.visitors as number,
+    }));
+}
+
+export function getRankedRegionsByVisitors(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedRegionByVisitors[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked regions by visitors start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked regions by visitors end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked regions by visitors start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT
+        country_code,
+        CASE
+          WHEN country_code IS NULL THEN NULL
+          ELSE min(country_name COLLATE BINARY)
+        END AS selected_country_name,
+        region_code,
+        CASE
+          WHEN region_code IS NULL THEN NULL
+          ELSE min(region_name COLLATE BINARY)
+        END AS selected_region_name,
+        count(DISTINCT visitor_id) AS visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY country_code, region_code
+      ORDER BY
+        visitors DESC,
+        (country_code IS NOT NULL OR region_code IS NOT NULL) ASC,
+        selected_country_name COLLATE BINARY ASC,
+        country_code COLLATE BINARY ASC,
+        selected_region_name COLLATE BINARY ASC,
+        region_code COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      countryCode: row.country_code as string | null,
+      countryName: row.selected_country_name as string | null,
+      regionCode: row.region_code as string | null,
+      regionName: row.selected_region_name as string | null,
       visitors: row.visitors as number,
     }));
 }

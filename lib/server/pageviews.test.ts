@@ -16,6 +16,7 @@ import {
   getRankedExitPages,
   getRankedPages,
   getRankedPagesBySessions,
+  getRankedRegionsByVisitors,
   getRankedReferrers,
   getRankedReferrersBySessions,
   getSessionCount,
@@ -24,6 +25,7 @@ import {
 } from "./pageviews";
 import type {
   RankedCountryByVisitors,
+  RankedRegionByVisitors,
   RankedReferrerBySessions,
 } from "./pageviews";
 import { initializeSites, registerSite } from "./sites";
@@ -2776,6 +2778,183 @@ test("rejects invalid country-ranking dates and ranges", () => {
       {
         message:
           "Ranked countries by visitors start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks regions by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [
+      pageviewSiteId,
+      visitorId,
+      countryCode,
+      countryName,
+      regionCode,
+      regionName,
+      occurredAt,
+    ] of [
+      [siteId, "wa-repeat", "US", "United States", "WA", "Washington", "2026-08-09T12:05:00.000Z"],
+      [siteId, "wa-repeat", "US", "United States of America", "WA", "Washington State", "2026-08-09T12:10:00.000Z"],
+      [siteId, "wa-repeat", "US", null, "WA", null, "2026-08-09T12:12:00.000Z"],
+      [siteId, "shared", "US", "United States", "WA", "Washington", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "US", "United States", "CA", "California", "2026-08-09T12:20:00.000Z"],
+      [siteId, "ca-only", "US", "United States", "CA", "California", "2026-08-09T12:25:00.000Z"],
+      [siteId, "canada-one", "CA", "Canada", "WA", "Western Region", "2026-08-09T12:30:00.000Z"],
+      [siteId, "canada-two", "CA", "Canada Alternate", "WA", "Western Area", "2026-08-09T12:35:00.000Z"],
+      [siteId, "unknown-us", "US", "United States", null, "Mystery", "2026-08-09T12:40:00.000Z"],
+      [siteId, "unknown-us", "US", "United States", null, null, "2026-08-09T12:41:00.000Z"],
+      [siteId, "unknown-us-two", "US", "United States", null, null, "2026-08-09T12:42:00.000Z"],
+      [siteId, "fully-unknown", null, "Mystery", null, "Mystery", "2026-08-09T12:45:00.000Z"],
+      [siteId, "fully-unknown", null, null, null, null, "2026-08-09T12:46:00.000Z"],
+      [siteId, "fully-unknown-two", null, null, null, null, "2026-08-09T12:47:00.000Z"],
+      [siteId, "start-boundary", "GB", "United Kingdom", "ENG", "England", "2026-08-09T12:00:00.000Z"],
+      [siteId, "end-boundary", "FR", "France", "IDF", "Ile-de-France", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "DE", "Germany", "BE", "Berlin", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "US", "United States", "WA", "Washington", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "US", "United States", "WA", "Washington", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        geography: {
+          countryCode,
+          countryName,
+          regionCode,
+          regionName,
+          cityName: null,
+        },
+      });
+    }
+
+    const rankedRegions: RankedRegionByVisitors[] =
+      getRankedRegionsByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedRegions, [
+      {
+        countryCode: null,
+        countryName: null,
+        regionCode: null,
+        regionName: null,
+        visitors: 2,
+      },
+      {
+        countryCode: "CA",
+        countryName: "Canada",
+        regionCode: "WA",
+        regionName: "Western Area",
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: null,
+        regionName: null,
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "CA",
+        regionName: "California",
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        visitors: 2,
+      },
+      {
+        countryCode: "GB",
+        countryName: "United Kingdom",
+        regionCode: "ENG",
+        regionName: "England",
+        visitors: 1,
+      },
+    ]);
+  });
+});
+
+test("returns no ranked regions when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedRegionsByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid region-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedRegionsByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message:
+          "Ranked regions by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedRegionsByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked regions by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedRegionsByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked regions by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedRegionsByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked regions by visitors start time must be earlier than end time",
       },
     );
   });
