@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test lib/browser/tracker.test.ts lib/overview-query.test.ts lib/server/database.test.ts lib/server/sites.test.ts lib/server/site-registration.test.ts lib/server/reporting-range.test.ts lib/server/visitor-trend.test.ts lib/server/overview-report.test.ts lib/server/pages-report.test.ts lib/server/geography-report.test.ts lib/server/technology-report.test.ts lib/server/pageviews.test.ts lib/server/runtime-database.test.ts lib/server/geolocation.test.ts lib/server/client-ip.test.ts lib/server/technology.test.ts app/api/overview.csv/route.test.ts app/api/pageviews/route.test.ts app/api/realtime/route.test.ts",
+    "test": "tsx --test lib/browser/tracker.test.ts lib/overview-query.test.ts lib/server/database.test.ts lib/server/sites.test.ts lib/server/site-registration.test.ts lib/server/reporting-range.test.ts lib/server/visitor-trend.test.ts lib/server/overview-report.test.ts lib/server/pages-report.test.ts lib/server/geography-report.test.ts lib/server/technology-report.test.ts lib/server/pageviews.test.ts lib/server/runtime-database.test.ts lib/server/geolocation.test.ts lib/server/client-ip.test.ts lib/server/technology.test.ts app/api/overview.csv/route.test.ts app/api/report.csv/route.test.ts app/api/pageviews/route.test.ts app/api/realtime/route.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
