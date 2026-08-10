@@ -57,6 +57,50 @@ function initializeRegisteredSite(
   }).id;
 }
 
+test("creates exactly the five nullable geography columns", () => {
+  withTemporaryDatabase((database) => {
+    initializeSites(database);
+    initializePageviews(database);
+
+    const columns = database
+      .prepare("PRAGMA table_info(pageviews)")
+      .all()
+      .map((row) => ({
+        name: row.name as string,
+        type: row.type as string,
+        notNull: row.notnull as number,
+      }));
+
+    assert.deepEqual(
+      columns.map((column) => column.name),
+      [
+        "id",
+        "site_id",
+        "visitor_id",
+        "path",
+        "referrer",
+        "occurred_at",
+        "country_code",
+        "country_name",
+        "region_code",
+        "region_name",
+        "city_name",
+      ],
+    );
+    assert.deepEqual(
+      columns.slice(-5),
+      [
+        { name: "country_code", type: "TEXT", notNull: 0 },
+        { name: "country_name", type: "TEXT", notNull: 0 },
+        { name: "region_code", type: "TEXT", notNull: 0 },
+        { name: "region_name", type: "TEXT", notNull: 0 },
+        { name: "city_name", type: "TEXT", notNull: 0 },
+      ],
+    );
+    assert.equal(columns.some((column) => /ip/i.test(column.name)), false);
+  });
+});
+
 test("initializes the pageviews table idempotently without losing rows", () => {
   withTemporaryDatabase((database) => {
     const siteId = initializeRegisteredSite(database);
@@ -75,6 +119,114 @@ test("initializes the pageviews table idempotently without losing rows", () => {
       database.prepare("SELECT count(*) AS count FROM pageviews").get()?.count,
       1,
     );
+    assert.equal(
+      database
+        .prepare("PRAGMA table_info(pageviews)")
+        .all()
+        .filter((row) =>
+          [
+            "country_code",
+            "country_name",
+            "region_code",
+            "region_name",
+            "city_name",
+          ].includes(row.name as string),
+        ).length,
+      5,
+    );
+  });
+});
+
+test("upgrades a pre-geography schema without changing rows or indexes", () => {
+  withTemporaryDatabase((database) => {
+    initializeSites(database);
+    const siteId = registerSite(database, {
+      name: "Existing Site",
+      domain: "existing.example",
+    }).id;
+    const occurredAt = new Date("2026-08-09T11:00:00.000Z");
+
+    database.exec(`
+      CREATE TABLE pageviews (
+        id INTEGER PRIMARY KEY,
+        site_id INTEGER NOT NULL REFERENCES sites(id),
+        visitor_id TEXT NOT NULL CHECK (length(trim(visitor_id)) > 0),
+        path TEXT NOT NULL CHECK (length(trim(path)) > 0),
+        referrer TEXT,
+        occurred_at INTEGER NOT NULL
+      );
+      CREATE INDEX pageviews_existing_index
+        ON pageviews (site_id, occurred_at);
+    `);
+    database
+      .prepare(`
+        INSERT INTO pageviews (
+          site_id,
+          visitor_id,
+          path,
+          referrer,
+          occurred_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      .run(
+        siteId,
+        "existing-visitor",
+        "/existing",
+        "https://source.example",
+        occurredAt.getTime(),
+      );
+
+    initializePageviews(database);
+    initializePageviews(database);
+
+    assert.deepEqual(
+      database
+        .prepare("PRAGMA table_info(pageviews)")
+        .all()
+        .map((row) => row.name),
+      [
+        "id",
+        "site_id",
+        "visitor_id",
+        "path",
+        "referrer",
+        "occurred_at",
+        "country_code",
+        "country_name",
+        "region_code",
+        "region_name",
+        "city_name",
+      ],
+    );
+    assert.deepEqual(
+      {
+        ...database.prepare("SELECT * FROM pageviews").get(),
+      },
+      {
+        id: 1,
+        site_id: siteId,
+        visitor_id: "existing-visitor",
+        path: "/existing",
+        referrer: "https://source.example",
+        occurred_at: occurredAt.getTime(),
+        country_code: null,
+        country_name: null,
+        region_code: null,
+        region_name: null,
+        city_name: null,
+      },
+    );
+    assert.equal(
+      database
+        .prepare(`
+          SELECT count(*) AS count
+          FROM sqlite_schema
+          WHERE type = 'index' AND name = 'pageviews_existing_index'
+        `)
+        .get()?.count,
+      1,
+    );
   });
 });
 
@@ -89,6 +241,13 @@ test("records normalized pageview data and returns the persisted row", () => {
       path: "  /writing/hello  ",
       referrer: "  https://example.com/source  ",
       occurredAt,
+      geography: {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        cityName: "Seattle",
+      },
     });
 
     assert.deepEqual(pageview, {
@@ -98,12 +257,33 @@ test("records normalized pageview data and returns the persisted row", () => {
       path: "/writing/hello",
       referrer: "https://example.com/source",
       occurredAt,
+      geography: {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        cityName: "Seattle",
+      },
     });
     assert.deepEqual(
       {
         ...database
           .prepare(
-            "SELECT id, site_id, visitor_id, path, referrer, occurred_at FROM pageviews",
+            `
+              SELECT
+                id,
+                site_id,
+                visitor_id,
+                path,
+                referrer,
+                occurred_at,
+                country_code,
+                country_name,
+                region_code,
+                region_name,
+                city_name
+              FROM pageviews
+            `,
           )
           .get(),
       },
@@ -114,6 +294,11 @@ test("records normalized pageview data and returns the persisted row", () => {
         path: "/writing/hello",
         referrer: "https://example.com/source",
         occurred_at: occurredAt.getTime(),
+        country_code: "US",
+        country_name: "United States",
+        region_code: "WA",
+        region_name: "Washington",
+        city_name: "Seattle",
       },
     );
   });
@@ -129,6 +314,13 @@ test("persists pageviews after the database is closed and reopened", () => {
       visitorId: "visitor-2",
       path: "/archive",
       occurredAt,
+      geography: {
+        countryCode: "GB",
+        countryName: "United Kingdom",
+        regionCode: "ENG",
+        regionName: "England",
+        cityName: "London",
+      },
     });
 
     database.close();
@@ -139,7 +331,20 @@ test("persists pageviews after the database is closed and reopened", () => {
         {
           ...reopenedDatabase
             .prepare(
-              "SELECT site_id, visitor_id, path, referrer, occurred_at FROM pageviews",
+              `
+                SELECT
+                  site_id,
+                  visitor_id,
+                  path,
+                  referrer,
+                  occurred_at,
+                  country_code,
+                  country_name,
+                  region_code,
+                  region_name,
+                  city_name
+                FROM pageviews
+              `,
             )
             .get(),
         },
@@ -149,6 +354,11 @@ test("persists pageviews after the database is closed and reopened", () => {
           path: "/archive",
           referrer: null,
           occurred_at: occurredAt.getTime(),
+          country_code: "GB",
+          country_name: "United Kingdom",
+          region_code: "ENG",
+          region_name: "England",
+          city_name: "London",
         },
       );
     } finally {
@@ -184,6 +394,79 @@ test("stores omitted and blank referrers as null", () => {
         .all()
         .map((row) => row.referrer),
       [null, null],
+    );
+  });
+});
+
+test("stores omitted and partially null geography without normalization", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const occurredAt = new Date("2026-08-09T14:30:00.000Z");
+
+    const omitted = recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/without-geography",
+      occurredAt,
+    });
+    const partial = recordPageview(database, {
+      siteId,
+      visitorId: "visitor-2",
+      path: "/partial-geography",
+      occurredAt,
+      geography: {
+        countryCode: "US",
+        countryName: null,
+        regionCode: null,
+        regionName: "  Washington  ",
+        cityName: null,
+      },
+    });
+
+    assert.deepEqual(omitted.geography, {
+      countryCode: null,
+      countryName: null,
+      regionCode: null,
+      regionName: null,
+      cityName: null,
+    });
+    assert.deepEqual(partial.geography, {
+      countryCode: "US",
+      countryName: null,
+      regionCode: null,
+      regionName: "  Washington  ",
+      cityName: null,
+    });
+    assert.deepEqual(
+      database
+        .prepare(`
+          SELECT
+            country_code,
+            country_name,
+            region_code,
+            region_name,
+            city_name
+          FROM pageviews
+          ORDER BY id ASC
+        `)
+        .all()
+        .map((row) => ({ ...row })),
+      [
+        {
+          country_code: null,
+          country_name: null,
+          region_code: null,
+          region_name: null,
+          city_name: null,
+        },
+        {
+          country_code: "US",
+          country_name: null,
+          region_code: null,
+          region_name: "  Washington  ",
+          city_name: null,
+        },
+      ],
     );
   });
 });

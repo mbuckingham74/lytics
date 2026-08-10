@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import type { Geography } from "./geolocation";
+
 export type Pageview = {
   id: number;
   siteId: number;
@@ -7,6 +9,7 @@ export type Pageview = {
   path: string;
   referrer: string | null;
   occurredAt: Date;
+  geography: Geography;
 };
 
 export type PageviewSummary = {
@@ -50,7 +53,16 @@ type RecordPageviewInput = {
   path: string;
   referrer?: string;
   occurredAt: Date;
+  geography?: Geography;
 };
+
+const geographyColumns = [
+  "country_code",
+  "country_name",
+  "region_code",
+  "region_name",
+  "city_name",
+] as const;
 
 function toPageview(row: Record<string, unknown>): Pageview {
   return {
@@ -60,6 +72,13 @@ function toPageview(row: Record<string, unknown>): Pageview {
     path: row.path as string,
     referrer: row.referrer as string | null,
     occurredAt: new Date(row.occurred_at as number),
+    geography: {
+      countryCode: row.country_code as string | null,
+      countryName: row.country_name as string | null,
+      regionCode: row.region_code as string | null,
+      regionName: row.region_name as string | null,
+      cityName: row.city_name as string | null,
+    },
   };
 }
 
@@ -71,9 +90,27 @@ export function initializePageviews(database: DatabaseSync): void {
       visitor_id TEXT NOT NULL CHECK (length(trim(visitor_id)) > 0),
       path TEXT NOT NULL CHECK (length(trim(path)) > 0),
       referrer TEXT,
-      occurred_at INTEGER NOT NULL
+      occurred_at INTEGER NOT NULL,
+      country_code TEXT,
+      country_name TEXT,
+      region_code TEXT,
+      region_name TEXT,
+      city_name TEXT
     )
   `);
+
+  const existingColumns = new Set(
+    database
+      .prepare("PRAGMA table_info(pageviews)")
+      .all()
+      .map((row) => row.name as string),
+  );
+
+  for (const column of geographyColumns) {
+    if (!existingColumns.has(column)) {
+      database.exec(`ALTER TABLE pageviews ADD COLUMN ${column} TEXT`);
+    }
+  }
 }
 
 export function recordPageview(
@@ -84,6 +121,13 @@ export function recordPageview(
   const path = input.path.trim();
   const referrer = input.referrer?.trim() || null;
   const occurredAt = input.occurredAt.getTime();
+  const geography = input.geography ?? {
+    countryCode: null,
+    countryName: null,
+    regionCode: null,
+    regionName: null,
+    cityName: null,
+  };
 
   if (visitorId.length === 0) {
     throw new Error("Pageview visitor ID cannot be blank");
@@ -99,11 +143,44 @@ export function recordPageview(
 
   const row = database
     .prepare(`
-      INSERT INTO pageviews (site_id, visitor_id, path, referrer, occurred_at)
-      VALUES (?, ?, ?, ?, ?)
-      RETURNING id, site_id, visitor_id, path, referrer, occurred_at
+      INSERT INTO pageviews (
+        site_id,
+        visitor_id,
+        path,
+        referrer,
+        occurred_at,
+        country_code,
+        country_name,
+        region_code,
+        region_name,
+        city_name
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING
+        id,
+        site_id,
+        visitor_id,
+        path,
+        referrer,
+        occurred_at,
+        country_code,
+        country_name,
+        region_code,
+        region_name,
+        city_name
     `)
-    .get(input.siteId, visitorId, path, referrer, occurredAt);
+    .get(
+      input.siteId,
+      visitorId,
+      path,
+      referrer,
+      occurredAt,
+      geography.countryCode,
+      geography.countryName,
+      geography.regionCode,
+      geography.regionName,
+      geography.cityName,
+    );
 
   if (!row) {
     throw new Error("Pageview insertion did not return a persisted record");
