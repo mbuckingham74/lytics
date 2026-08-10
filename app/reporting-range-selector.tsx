@@ -3,42 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-export type ReportingRangePreset = "today" | "7d" | "30d" | "90d";
+import {
+  createOverviewHref,
+  overviewRangePresets,
+  type OverviewRangePreset,
+} from "../lib/overview-query";
 
-const reportingRangeOptions: Array<{
-  value: ReportingRangePreset;
-  label: string;
-}> = [
-  { value: "today", label: "Today" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
-];
+const reportingRangeOptions = Object.values(overviewRangePresets);
 
 type ReportingRangeSelectorProps = {
-  selectedPreset: ReportingRangePreset;
+  selectedPreset: OverviewRangePreset;
   selectedSiteId: number;
   firstSiteId: number;
 };
-
-function createOverviewHref(
-  siteId: number,
-  firstSiteId: number,
-  preset: ReportingRangePreset,
-): string {
-  const parameters = new URLSearchParams();
-
-  if (siteId !== firstSiteId) {
-    parameters.set("site", String(siteId));
-  }
-
-  if (preset !== "7d") {
-    parameters.set("range", preset);
-  }
-
-  const query = parameters.toString();
-  return query ? `/?${query}` : "/";
-}
 
 export function ReportingRangeSelector({
   selectedPreset,
@@ -56,13 +33,18 @@ export function ReportingRangeSelector({
     setSelectedValue(selectedPreset);
   }, [selectedPreset]);
 
-  function handleChange(value: ReportingRangePreset): void {
+  function handleChange(value: OverviewRangePreset): void {
     setSelectedValue(value);
 
     startTransition(() => {
-      router.push(createOverviewHref(selectedSiteId, firstSiteId, value), {
-        scroll: false,
-      });
+      router.push(
+        createOverviewHref({
+          siteId: selectedSiteId,
+          firstSiteId,
+          rangePreset: value,
+        }),
+        { scroll: false },
+      );
     });
   }
 
@@ -75,7 +57,7 @@ export function ReportingRangeSelector({
         aria-label="Select reporting range"
         value={selectedValue}
         onChange={(event) =>
-          handleChange(event.target.value as ReportingRangePreset)
+          handleChange(event.target.value as OverviewRangePreset)
         }
       >
         {reportingRangeOptions.map((option) => (

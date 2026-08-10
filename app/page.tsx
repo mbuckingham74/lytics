@@ -1,5 +1,10 @@
 import Link from "next/link";
 
+import {
+  overviewRangePresets,
+  resolveOverviewRangePreset,
+  resolveOverviewSite,
+} from "../lib/overview-query";
 import { getOverviewReport } from "../lib/server/overview-report";
 import {
   createRecentCalendarSelection,
@@ -8,10 +13,7 @@ import {
 import { getRuntimeDatabase } from "../lib/server/runtime-database";
 import { listSites } from "../lib/server/sites";
 import { DashboardShell } from "./dashboard-shell";
-import {
-  ReportingRangeSelector,
-  type ReportingRangePreset,
-} from "./reporting-range-selector";
+import { ReportingRangeSelector } from "./reporting-range-selector";
 
 export const dynamic = "force-dynamic";
 
@@ -20,67 +22,9 @@ const chartHeight = 200;
 const chartTop = 8;
 const chartBottom = 192;
 
-const reportingRangePresets = {
-  today: {
-    dayCount: 1,
-    label: "Today",
-    periodCopy: "today",
-  },
-  "7d": {
-    dayCount: 7,
-    label: "Last 7 days",
-    periodCopy: "the last 7 days",
-  },
-  "30d": {
-    dayCount: 30,
-    label: "Last 30 days",
-    periodCopy: "the last 30 days",
-  },
-  "90d": {
-    dayCount: 90,
-    label: "Last 90 days",
-    periodCopy: "the last 90 days",
-  },
-} as const satisfies Record<
-  ReportingRangePreset,
-  { dayCount: number; label: string; periodCopy: string }
->;
-
 type HomeProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
-
-function resolveSelectedSite(
-  sites: ReturnType<typeof listSites>,
-  value: string | string[] | undefined,
-) {
-  const fallbackSite = sites[0];
-
-  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) {
-    return fallbackSite;
-  }
-
-  const siteId = Number(value);
-
-  if (!Number.isSafeInteger(siteId)) {
-    return fallbackSite;
-  }
-
-  return sites.find((site) => site.id === siteId) ?? fallbackSite;
-}
-
-function resolveReportingRangePreset(
-  value: string | string[] | undefined,
-): ReportingRangePreset {
-  if (
-    typeof value !== "string" ||
-    !Object.hasOwn(reportingRangePresets, value)
-  ) {
-    return "7d";
-  }
-
-  return value as ReportingRangePreset;
-}
 
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
@@ -180,9 +124,13 @@ export default async function Home({ searchParams }: HomeProps) {
   }
 
   const query = await searchParams;
-  const site = resolveSelectedSite(sites, query.site);
-  const rangePreset = resolveReportingRangePreset(query.range);
-  const range = reportingRangePresets[rangePreset];
+  const site = resolveOverviewSite(sites, query.site);
+  const rangePreset = resolveOverviewRangePreset(query.range);
+  const range = overviewRangePresets[rangePreset];
+
+  if (!site) {
+    return <EmptyOverview />;
+  }
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
