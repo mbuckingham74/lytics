@@ -591,11 +591,13 @@ h1 {
   max-width: 900px;
 }
 
-.geography-section {
+.geography-section,
+.technology-section {
   padding-top: 24px;
 }
 
-.geography-rankings-grid {
+.geography-rankings-grid,
+.technology-rankings-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
@@ -997,7 +999,8 @@ h1 {
 
 @media (max-width: 1100px) {
   .pages-rankings-grid,
-  .geography-rankings-grid {
+  .geography-rankings-grid,
+  .technology-rankings-grid {
     grid-template-columns: 1fr;
   }
 }

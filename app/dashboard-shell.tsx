@@ -8,7 +8,7 @@ const navigationItems = [
   { label: "Pages", href: "/pages" },
   { label: "Referrers", href: "/referrers" },
   { label: "Geography", href: "/geography" },
-  { label: "Technology" },
+  { label: "Technology", href: "/technology" },
   { label: "Realtime", href: "/realtime" },
   { label: "Settings", href: "/settings" },
 ] as const;
@@ -19,6 +19,7 @@ type DashboardShellProps = {
     | "Pages"
     | "Referrers"
     | "Geography"
+    | "Technology"
     | "Realtime"
     | "Settings";
   children: ReactNode;
