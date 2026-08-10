@@ -24,6 +24,11 @@ export type RankedEntryPage = {
   sessions: number;
 };
 
+export type RankedExitPage = {
+  path: string;
+  sessions: number;
+};
+
 export type RankedReferrer = {
   referrer: string | null;
   pageviews: number;
@@ -535,6 +540,90 @@ export function getRankedEntryPages(
       WHERE begins_session = 1
         AND occurred_at >= ?
         AND occurred_at < ?
+      GROUP BY path
+      ORDER BY sessions DESC, path COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      path: row.path as string,
+      sessions: row.sessions as number,
+    }));
+}
+
+export function getRankedExitPages(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedExitPage[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Ranked exit pages start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Ranked exit pages end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked exit pages start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          id,
+          visitor_id,
+          path,
+          occurred_at,
+          CASE
+            WHEN lag(occurred_at) OVER (
+              PARTITION BY visitor_id
+              ORDER BY occurred_at ASC, id ASC
+            ) IS NULL
+              OR occurred_at - lag(occurred_at) OVER (
+                PARTITION BY visitor_id
+                ORDER BY occurred_at ASC, id ASC
+              ) >= 1800000
+            THEN 1
+            ELSE 0
+          END AS begins_session
+        FROM pageviews
+        WHERE site_id = ?
+      ),
+      identified_pageviews AS (
+        SELECT
+          id,
+          visitor_id,
+          path,
+          occurred_at,
+          sum(begins_session) OVER (
+            PARTITION BY visitor_id
+            ORDER BY occurred_at ASC, id ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS session_number
+        FROM ordered_pageviews
+      ),
+      ranked_session_pageviews AS (
+        SELECT
+          path,
+          min(occurred_at) OVER (
+            PARTITION BY visitor_id, session_number
+          ) AS started_at,
+          row_number() OVER (
+            PARTITION BY visitor_id, session_number
+            ORDER BY occurred_at DESC, id DESC
+          ) AS exit_rank
+        FROM identified_pageviews
+      )
+      SELECT path, count(*) AS sessions
+      FROM ranked_session_pageviews
+      WHERE exit_rank = 1
+        AND started_at >= ?
+        AND started_at < ?
       GROUP BY path
       ORDER BY sessions DESC, path COLLATE BINARY ASC
     `)

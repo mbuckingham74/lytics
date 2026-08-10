@@ -12,6 +12,7 @@ import {
   getPagesPerSession,
   getPageviewSummary,
   getRankedEntryPages,
+  getRankedExitPages,
   getRankedPages,
   getRankedReferrers,
   getSessionCount,
@@ -1451,6 +1452,257 @@ test("rejects invalid ranked entry-page dates and non-increasing ranges", () => 
           endAt: startAt,
         }),
       { message: "Ranked entry pages start time must be earlier than end time" },
+    );
+  });
+});
+
+test("ranks each session's final page without counting entry or intermediate pages", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, path, occurredAt] of [
+      ["visitor-1", "/landing", "2026-08-09T12:00:00.000Z"],
+      ["visitor-1", "/middle", "2026-08-09T12:10:00.000Z"],
+      ["visitor-1", "/exit", "2026-08-09T12:20:00.000Z"],
+      ["visitor-2", "/other-landing", "2026-08-09T12:05:00.000Z"],
+      ["visitor-2", "/exit", "2026-08-09T12:15:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [{ path: "/exit", sessions: 2 }],
+    );
+  });
+});
+
+test("sessionizes ranked exits by occurrence time independently per visitor and site", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, path, occurredAt] of [
+      [siteId, "visitor-1", "/second-entry", "2026-08-09T12:50:00.000Z"],
+      [siteId, "visitor-2", "/shared-exit", "2026-08-09T12:15:00.000Z"],
+      [siteId, "visitor-1", "/first-entry", "2026-08-09T12:00:00.000Z"],
+      [otherSiteId, "visitor-1", "/other-site", "2026-08-09T12:35:00.000Z"],
+      [siteId, "visitor-1", "/shared-exit", "2026-08-09T13:00:00.000Z"],
+      [siteId, "visitor-2", "/visitor-two-entry", "2026-08-09T12:05:00.000Z"],
+      [siteId, "visitor-1", "/shared-exit", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T14:00:00.000Z"),
+      }),
+      [{ path: "/shared-exit", sessions: 3 }],
+    );
+  });
+});
+
+test("starts a ranked exit-page session at the exact thirty-minute boundary", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [path, occurredAt] of [
+      ["/first", "2026-08-09T12:00:00.000Z"],
+      ["/within-exit", "2026-08-09T12:29:59.999Z"],
+      ["/exact-exit", "2026-08-09T12:59:59.999Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId: "visitor-1",
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/exact-exit", sessions: 1 },
+        { path: "/within-exit", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("uses the higher pageview ID as the exit at identical timestamps", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const occurredAt = new Date("2026-08-09T12:30:00.000Z");
+
+    recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/lower-id",
+      occurredAt,
+    });
+    recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/higher-id",
+      occurredAt,
+    });
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [{ path: "/higher-id", sessions: 1 }],
+    );
+  });
+});
+
+test("attributes complete ranked exits by session starts in the half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, path, occurredAt] of [
+      ["crosses-start", "/before-start", "2026-08-09T11:50:00.000Z"],
+      ["crosses-start", "/inside", "2026-08-09T12:10:00.000Z"],
+      ["crosses-start", "/beyond-range", "2026-08-09T13:09:59.998Z"],
+      ["crosses-start", "/through-range", "2026-08-09T12:39:59.999Z"],
+      ["starts-at-start", "/at-start", "2026-08-09T12:00:00.000Z"],
+      ["starts-at-start", "/at-start-exit", "2026-08-09T12:05:00.000Z"],
+      ["crosses-end", "/before-end", "2026-08-09T12:50:00.000Z"],
+      ["crosses-end", "/after-end-exit", "2026-08-09T13:10:00.000Z"],
+      ["starts-at-end", "/at-end", "2026-08-09T13:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/after-end-exit", sessions: 1 },
+        { path: "/at-start-exit", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("orders tied ranked exit pages by stored path using binary ordering", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const path of ["/alpha", "/Alpha", "/beta"]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: path,
+        path,
+        occurredAt: new Date("2026-08-09T12:30:00.000Z"),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/Alpha", sessions: 1 },
+        { path: "/alpha", sessions: 1 },
+        { path: "/beta", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("returns no ranked exit pages when the range has no session starts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedExitPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid ranked exit-page dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedExitPages(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      { message: "Ranked exit pages start time must be a valid date" },
+    );
+    assert.throws(
+      () =>
+        getRankedExitPages(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      { message: "Ranked exit pages end time must be a valid date" },
+    );
+    assert.throws(
+      () =>
+        getRankedExitPages(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      { message: "Ranked exit pages start time must be earlier than end time" },
+    );
+    assert.throws(
+      () =>
+        getRankedExitPages(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      { message: "Ranked exit pages start time must be earlier than end time" },
     );
   });
 });
