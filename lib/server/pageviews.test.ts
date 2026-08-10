@@ -11,6 +11,7 @@ import {
   getBounceRate,
   getPagesPerSession,
   getPageviewSummary,
+  getRankedCitiesByVisitors,
   getRankedCountriesByVisitors,
   getRankedEntryPages,
   getRankedExitPages,
@@ -24,6 +25,7 @@ import {
   recordPageview,
 } from "./pageviews";
 import type {
+  RankedCityByVisitors,
   RankedCountryByVisitors,
   RankedRegionByVisitors,
   RankedReferrerBySessions,
@@ -2955,6 +2957,198 @@ test("rejects invalid region-ranking dates and ranges", () => {
       {
         message:
           "Ranked regions by visitors start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks cities by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [
+      pageviewSiteId,
+      visitorId,
+      countryCode,
+      countryName,
+      regionCode,
+      regionName,
+      cityName,
+      occurredAt,
+    ] of [
+      [siteId, "seattle-repeat", "US", "United States", "WA", "Washington", "Seattle", "2026-08-09T12:05:00.000Z"],
+      [siteId, "seattle-repeat", "US", "United States of America", "WA", "Washington State", "Seattle", "2026-08-09T12:10:00.000Z"],
+      [siteId, "shared", "US", "United States", "WA", "Washington", "Seattle", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "US", "United States", "WA", "Washington", "Portland", "2026-08-09T12:20:00.000Z"],
+      [siteId, "wa-portland", "US", "United States", "WA", "Washington", "Portland", "2026-08-09T12:25:00.000Z"],
+      [siteId, "ca-portland-one", "US", "United States", "CA", "California", "Portland", "2026-08-09T12:30:00.000Z"],
+      [siteId, "ca-portland-two", "US", "United States of America", "CA", "California State", "Portland", "2026-08-09T12:31:00.000Z"],
+      [siteId, "canada-portland-one", "CA", "Canada", "BC", "British Columbia", "Portland", "2026-08-09T12:32:00.000Z"],
+      [siteId, "canada-portland-two", "CA", "Canada Alternate", "BC", "British Columbia Province", "Portland", "2026-08-09T12:33:00.000Z"],
+      [siteId, "unknown-city", "US", "United States", "WA", "Washington", null, "2026-08-09T12:35:00.000Z"],
+      [siteId, "unknown-city", "US", "United States of America", "WA", "Washington State", null, "2026-08-09T12:36:00.000Z"],
+      [siteId, "unknown-city-two", "US", "United States", "WA", "Washington", null, "2026-08-09T12:37:00.000Z"],
+      [siteId, "fully-unknown", null, "Mystery", null, "Mystery", null, "2026-08-09T12:40:00.000Z"],
+      [siteId, "fully-unknown", null, null, null, null, null, "2026-08-09T12:41:00.000Z"],
+      [siteId, "fully-unknown-two", null, null, null, null, null, "2026-08-09T12:42:00.000Z"],
+      [siteId, "start-boundary", "GB", "United Kingdom", "ENG", "England", "London", "2026-08-09T12:00:00.000Z"],
+      [siteId, "end-boundary", "FR", "France", "IDF", "Ile-de-France", "Paris", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "DE", "Germany", "BE", "Berlin", "Berlin", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "US", "United States", "WA", "Washington", "Seattle", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "US", "United States", "WA", "Washington", "Seattle", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        geography: {
+          countryCode,
+          countryName,
+          regionCode,
+          regionName,
+          cityName,
+        },
+      });
+    }
+
+    const rankedCities: RankedCityByVisitors[] =
+      getRankedCitiesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedCities, [
+      {
+        countryCode: null,
+        countryName: null,
+        regionCode: null,
+        regionName: null,
+        cityName: null,
+        visitors: 2,
+      },
+      {
+        countryCode: "CA",
+        countryName: "Canada",
+        regionCode: "BC",
+        regionName: "British Columbia",
+        cityName: "Portland",
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "CA",
+        regionName: "California",
+        cityName: "Portland",
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        cityName: null,
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        cityName: "Portland",
+        visitors: 2,
+      },
+      {
+        countryCode: "US",
+        countryName: "United States",
+        regionCode: "WA",
+        regionName: "Washington",
+        cityName: "Seattle",
+        visitors: 2,
+      },
+      {
+        countryCode: "GB",
+        countryName: "United Kingdom",
+        regionCode: "ENG",
+        regionName: "England",
+        cityName: "London",
+        visitors: 1,
+      },
+    ]);
+  });
+});
+
+test("returns no ranked cities when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedCitiesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid city-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedCitiesByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message: "Ranked cities by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCitiesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked cities by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCitiesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked cities by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCitiesByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked cities by visitors start time must be earlier than end time",
       },
     );
   });
