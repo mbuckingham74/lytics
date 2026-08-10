@@ -8,6 +8,10 @@ import {
 import { getRuntimeDatabase } from "../lib/server/runtime-database";
 import { listSites } from "../lib/server/sites";
 import { DashboardShell } from "./dashboard-shell";
+import {
+  ReportingRangeSelector,
+  type ReportingRangePreset,
+} from "./reporting-range-selector";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +19,32 @@ const chartWidth = 600;
 const chartHeight = 200;
 const chartTop = 8;
 const chartBottom = 192;
+
+const reportingRangePresets = {
+  today: {
+    dayCount: 1,
+    label: "Today",
+    periodCopy: "today",
+  },
+  "7d": {
+    dayCount: 7,
+    label: "Last 7 days",
+    periodCopy: "the last 7 days",
+  },
+  "30d": {
+    dayCount: 30,
+    label: "Last 30 days",
+    periodCopy: "the last 30 days",
+  },
+  "90d": {
+    dayCount: 90,
+    label: "Last 90 days",
+    periodCopy: "the last 90 days",
+  },
+} as const satisfies Record<
+  ReportingRangePreset,
+  { dayCount: number; label: string; periodCopy: string }
+>;
 
 type HomeProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -37,6 +67,19 @@ function resolveSelectedSite(
   }
 
   return sites.find((site) => site.id === siteId) ?? fallbackSite;
+}
+
+function resolveReportingRangePreset(
+  value: string | string[] | undefined,
+): ReportingRangePreset {
+  if (
+    typeof value !== "string" ||
+    !Object.hasOwn(reportingRangePresets, value)
+  ) {
+    return "7d";
+  }
+
+  return value as ReportingRangePreset;
 }
 
 function formatCount(value: number): string {
@@ -75,14 +118,28 @@ function toUtcCalendarInstant(date: string): Date {
   return instant;
 }
 
-function formatShortTrendDate(
+function formatTrendDate(
   formatter: Intl.DateTimeFormat,
   date: string,
 ): string {
   const parts = formatter.formatToParts(toUtcCalendarInstant(date));
-  const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const prefix =
+    parts.find((part) => part.type === "month")?.value ??
+    parts.find((part) => part.type === "weekday")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
-  return `${weekday} ${day}`;
+  return `${prefix} ${day}`;
+}
+
+function getVisibleTrendLabels<T>(points: T[]): T[] {
+  const maximumLabelCount = 7;
+
+  if (points.length <= maximumLabelCount) {
+    return points;
+  }
+
+  return Array.from({ length: maximumLabelCount }, (_, index) =>
+    points[Math.round((index / (maximumLabelCount - 1)) * (points.length - 1))],
+  );
 }
 
 function EmptyOverview() {
@@ -122,14 +179,17 @@ export default async function Home({ searchParams }: HomeProps) {
     return <EmptyOverview />;
   }
 
-  const site = resolveSelectedSite(sites, (await searchParams).site);
+  const query = await searchParams;
+  const site = resolveSelectedSite(sites, query.site);
+  const rangePreset = resolveReportingRangePreset(query.range);
+  const range = reportingRangePresets[rangePreset];
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
   const selection = createRecentCalendarSelection({
     nowAt,
     timeZone,
-    dayCount: 7,
+    dayCount: range.dayCount,
   });
   const report = getOverviewReport(database, {
     siteId: site.id,
@@ -159,7 +219,9 @@ export default async function Home({ searchParams }: HomeProps) {
   ];
   const shortDateFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "UTC",
-    weekday: "short",
+    ...(range.dayCount > 7
+      ? { month: "short" as const }
+      : { weekday: "short" as const }),
     day: "numeric",
   });
   const accessibleDateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -170,17 +232,19 @@ export default async function Home({ searchParams }: HomeProps) {
   });
   const points = report.dailyUniqueVisitorTrend.map((point, index) => ({
     ...point,
-    label: formatShortTrendDate(shortDateFormatter, point.date),
+    label: formatTrendDate(shortDateFormatter, point.date),
     accessibleDate: accessibleDateFormatter.format(toUtcCalendarInstant(point.date)),
     x:
-      (index / Math.max(report.dailyUniqueVisitorTrend.length - 1, 1)) *
-      chartWidth,
+      report.dailyUniqueVisitorTrend.length === 1
+        ? chartWidth / 2
+        : (index / (report.dailyUniqueVisitorTrend.length - 1)) * chartWidth,
     y:
       chartBottom -
       (point.uniqueVisitors / chartMaximum) * (chartBottom - chartTop),
   }));
+  const visibleTrendLabels = getVisibleTrendLabels(points);
   const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const areaPath = points.length > 0
+  const areaPath = points.length > 1
     ? `M 0 ${chartBottom} L ${points.map((point) => `${point.x} ${point.y}`).join(" L ")} L ${chartWidth} ${chartBottom} Z`
     : "";
   const firstTrendDate = points[0]?.accessibleDate ?? report.startDate;
@@ -223,7 +287,11 @@ export default async function Home({ searchParams }: HomeProps) {
               {formatCount(report.realtimeVisitors)} live now
             </span>
             <button type="button" disabled aria-label="Export overview as CSV">CSV</button>
-            <button type="button" disabled aria-label="Select date range, currently Last 7 days">Last 7 days</button>
+            <ReportingRangeSelector
+              selectedPreset={rangePreset}
+              selectedSiteId={site.id}
+              firstSiteId={sites[0].id}
+            />
           </div>
         </header>
 
@@ -231,7 +299,7 @@ export default async function Home({ searchParams }: HomeProps) {
           <div className="section-heading">
             <div>
               <h2 id="overview-heading">Overview</h2>
-              <p>Key activity for the selected 7-day period</p>
+              <p>Key activity for {range.periodCopy}</p>
             </div>
             <span className="updated-label">{report.timeZone}</span>
           </div>
@@ -294,8 +362,14 @@ export default async function Home({ searchParams }: HomeProps) {
                     />
                   ))}
                 </svg>
-                <div className="chart-x-axis" aria-hidden="true">
-                  {points.map((point) => (
+                <div
+                  className="chart-x-axis"
+                  style={{
+                    gridTemplateColumns: `repeat(${visibleTrendLabels.length}, minmax(0, 1fr))`,
+                  }}
+                  aria-hidden="true"
+                >
+                  {visibleTrendLabels.map((point) => (
                     <span key={point.date}>{point.label}</span>
                   ))}
                 </div>

@@ -249,6 +249,7 @@ h1 {
 }
 
 .header-actions button,
+.reporting-range-selector,
 .realtime-status {
   min-height: 32px;
   display: inline-flex;
@@ -263,6 +264,41 @@ h1 {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.reporting-range-selector {
+  position: relative;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.reporting-range-selector:hover {
+  border-color: #363d39;
+  background: #181c1a;
+}
+
+.reporting-range-selector:focus-within {
+  border-color: #347655;
+  box-shadow: 0 0 0 3px rgb(72 199 135 / 10%);
+}
+
+.reporting-range-selector[aria-busy="true"] {
+  color: #c3cbc7;
+}
+
+.range-selector-chevron {
+  color: #737c77;
+  font-size: 13px;
+}
+
+.reporting-range-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  cursor: pointer;
+  opacity: 0;
 }
 
 .realtime-status {
@@ -458,7 +494,6 @@ h1 {
 
 .chart-x-axis {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
   margin-top: 8px;
   color: #747d78;
   font-size: 10px;
@@ -472,6 +507,10 @@ h1 {
 
 .chart-x-axis span:last-child {
   text-align: right;
+}
+
+.chart-x-axis span:only-child {
+  text-align: center;
 }
 
 .rankings-grid {
