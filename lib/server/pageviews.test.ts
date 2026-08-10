@@ -14,6 +14,7 @@ import {
   getRankedEntryPages,
   getRankedExitPages,
   getRankedPages,
+  getRankedPagesBySessions,
   getRankedReferrers,
   getSessionCount,
   initializePageviews,
@@ -1204,6 +1205,217 @@ test("rejects invalid ranked-page dates and non-increasing ranges", () => {
           endAt: startAt,
         }),
       /start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("ranks pages by distinct sessions without changing raw pageview ranking", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, path, occurredAt] of [
+      ["visitor-1", "/repeat", "2026-08-09T12:00:00.000Z"],
+      ["visitor-1", "/repeat", "2026-08-09T12:05:00.000Z"],
+      ["visitor-1", "/other", "2026-08-09T12:10:00.000Z"],
+      ["visitor-1", "/repeat", "2026-08-09T12:15:00.000Z"],
+      ["visitor-2", "/repeat", "2026-08-09T12:20:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    const range = {
+      siteId,
+      startAt: new Date("2026-08-09T12:00:00.000Z"),
+      endAt: new Date("2026-08-09T13:00:00.000Z"),
+    };
+
+    assert.deepEqual(getRankedPages(database, range), [
+      { path: "/repeat", pageviews: 4 },
+      { path: "/other", pageviews: 1 },
+    ]);
+    assert.deepEqual(getRankedPagesBySessions(database, range), [
+      { path: "/repeat", sessions: 2 },
+      { path: "/other", sessions: 1 },
+    ]);
+  });
+});
+
+test("sessionizes ranked pages independently by visitor and site in occurrence and ID order", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, path, occurredAt] of [
+      [siteId, "visitor-1", "/first-session", "2026-08-09T12:59:59.999Z"],
+      [siteId, "visitor-1", "/first-session", "2026-08-09T12:00:00.000Z"],
+      [otherSiteId, "visitor-1", "/other-site", "2026-08-09T12:45:00.000Z"],
+      [siteId, "visitor-1", "/first-session", "2026-08-09T12:29:59.999Z"],
+      [siteId, "visitor-2", "/first-session", "2026-08-09T12:10:00.000Z"],
+      [siteId, "visitor-2", "/same-time-a", "2026-08-09T12:20:00.000Z"],
+      [siteId, "visitor-2", "/same-time-b", "2026-08-09T12:20:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPagesBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:30:00.000Z"),
+      }),
+      [
+        { path: "/first-session", sessions: 3 },
+        { path: "/same-time-a", sessions: 1 },
+        { path: "/same-time-b", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("selects ranked-page sessions by full-history starts in the half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, path, occurredAt] of [
+      ["before-start", "/excluded-before", "2026-08-09T11:50:00.000Z"],
+      ["before-start", "/excluded-inside", "2026-08-09T12:10:00.000Z"],
+      ["at-start", "/at-start", "2026-08-09T12:00:00.000Z"],
+      ["at-start", "/bridge-one", "2026-08-09T12:20:00.000Z"],
+      ["at-start", "/bridge-two", "2026-08-09T12:49:00.000Z"],
+      ["at-start", "/at-end-path", "2026-08-09T13:00:00.000Z"],
+      ["crosses-end", "/before-end", "2026-08-09T12:50:00.000Z"],
+      ["crosses-end", "/after-end", "2026-08-09T13:10:00.000Z"],
+      ["starts-at-end", "/excluded-at-end", "2026-08-09T13:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPagesBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/after-end", sessions: 1 },
+        { path: "/at-end-path", sessions: 1 },
+        { path: "/at-start", sessions: 1 },
+        { path: "/before-end", sessions: 1 },
+        { path: "/bridge-one", sessions: 1 },
+        { path: "/bridge-two", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("orders tied session-ranked pages by stored path using binary ordering", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const path of ["/alpha", "/Alpha", "/beta"]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: path,
+        path,
+        occurredAt: new Date("2026-08-09T12:30:00.000Z"),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPagesBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/Alpha", sessions: 1 },
+        { path: "/alpha", sessions: 1 },
+        { path: "/beta", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("returns no session-ranked pages when the range has no session starts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedPagesBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid session-ranked-page dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedPagesBySessions(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      { message: "Ranked pages by sessions start time must be a valid date" },
+    );
+    assert.throws(
+      () =>
+        getRankedPagesBySessions(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      { message: "Ranked pages by sessions end time must be a valid date" },
+    );
+    assert.throws(
+      () =>
+        getRankedPagesBySessions(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked pages by sessions start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedPagesBySessions(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked pages by sessions start time must be earlier than end time",
+      },
     );
   });
 });

@@ -19,6 +19,11 @@ export type RankedPage = {
   pageviews: number;
 };
 
+export type RankedPageBySessions = {
+  path: string;
+  sessions: number;
+};
+
 export type RankedEntryPage = {
   path: string;
   sessions: number;
@@ -490,6 +495,93 @@ export function getRankedPages(
     .map((row) => ({
       path: row.path as string,
       pageviews: row.pageviews as number,
+    }));
+}
+
+export function getRankedPagesBySessions(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedPageBySessions[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked pages by sessions start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Ranked pages by sessions end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked pages by sessions start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          id,
+          visitor_id,
+          path,
+          occurred_at,
+          CASE
+            WHEN lag(occurred_at) OVER (
+              PARTITION BY visitor_id
+              ORDER BY occurred_at ASC, id ASC
+            ) IS NULL
+              OR occurred_at - lag(occurred_at) OVER (
+                PARTITION BY visitor_id
+                ORDER BY occurred_at ASC, id ASC
+              ) >= 1800000
+            THEN 1
+            ELSE 0
+          END AS begins_session
+        FROM pageviews
+        WHERE site_id = ?
+      ),
+      identified_pageviews AS (
+        SELECT
+          id,
+          visitor_id,
+          path,
+          occurred_at,
+          sum(begins_session) OVER (
+            PARTITION BY visitor_id
+            ORDER BY occurred_at ASC, id ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS session_number
+        FROM ordered_pageviews
+      ),
+      session_pageviews AS (
+        SELECT
+          visitor_id,
+          session_number,
+          path,
+          min(occurred_at) OVER (
+            PARTITION BY visitor_id, session_number
+          ) AS started_at
+        FROM identified_pageviews
+      ),
+      distinct_session_paths AS (
+        SELECT DISTINCT visitor_id, session_number, path, started_at
+        FROM session_pageviews
+      )
+      SELECT path, count(*) AS sessions
+      FROM distinct_session_paths
+      WHERE started_at >= ?
+        AND started_at < ?
+      GROUP BY path
+      ORDER BY sessions DESC, path COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      path: row.path as string,
+      sessions: row.sessions as number,
     }));
 }
 
