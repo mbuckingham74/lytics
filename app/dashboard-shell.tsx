@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { SiteSelector, type SiteSelectorOption } from "./site-selector";
+
 const navigationItems = [
   { label: "Overview", href: "/" },
   { label: "Pages" },
@@ -16,6 +18,8 @@ type DashboardShellProps = {
   children: ReactNode;
   siteCaption?: string;
   siteName?: string;
+  siteOptions?: SiteSelectorOption[];
+  selectedSiteId?: number;
 };
 
 export function DashboardShell({
@@ -23,20 +27,26 @@ export function DashboardShell({
   children,
   siteCaption = "Website",
   siteName = "example.com",
+  siteOptions,
+  selectedSiteId,
 }: DashboardShellProps) {
   return (
     <div className="dashboard-shell">
       <aside className="sidebar" aria-label="Dashboard sidebar">
         <div className="wordmark">Lytics</div>
 
-        <button className="site-selector" type="button" aria-label="Select website" disabled>
-          <span className="site-mark" aria-hidden="true">{siteName.charAt(0)}</span>
-          <span className="site-copy">
-            <span className="site-caption">{siteCaption}</span>
-            <span className="site-name">{siteName}</span>
-          </span>
-          <span className="selector-chevron" aria-hidden="true">⌄</span>
-        </button>
+        {siteOptions && selectedSiteId ? (
+          <SiteSelector options={siteOptions} selectedSiteId={selectedSiteId} />
+        ) : (
+          <button className="site-selector" type="button" aria-label="Select website" disabled>
+            <span className="site-mark" aria-hidden="true">{siteName.charAt(0)}</span>
+            <span className="site-copy">
+              <span className="site-caption">{siteCaption}</span>
+              <span className="site-name">{siteName}</span>
+            </span>
+            <span className="selector-chevron" aria-hidden="true">⌄</span>
+          </button>
+        )}
 
         <nav className="primary-nav" aria-label="Analytics sections">
           <ul>

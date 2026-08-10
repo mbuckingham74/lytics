@@ -16,6 +16,29 @@ const chartHeight = 200;
 const chartTop = 8;
 const chartBottom = 192;
 
+type HomeProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function resolveSelectedSite(
+  sites: ReturnType<typeof listSites>,
+  value: string | string[] | undefined,
+) {
+  const fallbackSite = sites[0];
+
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) {
+    return fallbackSite;
+  }
+
+  const siteId = Number(value);
+
+  if (!Number.isSafeInteger(siteId)) {
+    return fallbackSite;
+  }
+
+  return sites.find((site) => site.id === siteId) ?? fallbackSite;
+}
+
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
@@ -91,13 +114,15 @@ function EmptyOverview() {
   );
 }
 
-export default function Home() {
+export default async function Home({ searchParams }: HomeProps) {
   const database = getRuntimeDatabase();
-  const site = listSites(database)[0];
+  const sites = listSites(database);
 
-  if (!site) {
+  if (sites.length === 0) {
     return <EmptyOverview />;
   }
+
+  const site = resolveSelectedSite(sites, (await searchParams).site);
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
@@ -180,7 +205,11 @@ export default function Home() {
   ];
 
   return (
-    <DashboardShell activeSection="Overview" siteName={site.domain}>
+    <DashboardShell
+      activeSection="Overview"
+      siteOptions={sites}
+      selectedSiteId={site.id}
+    >
       <main className="main-content">
         <header className="content-header">
           <div>
