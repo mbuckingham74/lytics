@@ -3,6 +3,7 @@ import { resolveGeography } from "../../../lib/server/geolocation";
 import { recordPageview } from "../../../lib/server/pageviews";
 import { getRuntimeDatabase } from "../../../lib/server/runtime-database";
 import { findSiteByDomain } from "../../../lib/server/sites";
+import { resolveTechnology } from "../../../lib/server/technology";
 
 export const runtime = "nodejs";
 
@@ -230,6 +231,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const geography = await resolveGeography(clientIp);
+    const technology = resolveTechnology(request.headers.get("user-agent"));
 
     recordPageview(resolution.database, {
       siteId: resolution.siteId,
@@ -238,6 +240,7 @@ export async function POST(request: Request): Promise<Response> {
       referrer: body.referrer,
       occurredAt,
       geography,
+      technology,
     });
   } catch {
     return resolvedError("Unable to record pageview", 500, corsOrigin);

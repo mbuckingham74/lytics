@@ -78,6 +78,7 @@ function postRequest(input: {
   headers?: HeadersInit;
   origin?: string;
   url?: string;
+  userAgent?: string | null;
 } = {}): Request {
   const headers = new Headers(input.headers);
   const clientIp = input.clientIp === undefined
@@ -94,6 +95,10 @@ function postRequest(input: {
 
   if (input.contentType !== null && input.contentType !== undefined) {
     headers.set("Content-Type", input.contentType);
+  }
+
+  if (input.userAgent !== null && input.userAgent !== undefined) {
+    headers.set("User-Agent", input.userAgent);
   }
 
   return new Request(input.url ?? "http://lytics.test/api/pageviews", {
@@ -166,6 +171,10 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
       postRequest({
         origin,
         contentType: "application/json; charset=utf-8",
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+          "AppleWebKit/537.36 (KHTML, like Gecko) " +
+          "Chrome/136.0.0.0 Safari/537.36",
         body: jsonBody({
           visitorId: "  opaque visitor value  ",
           path: "  /writing/hello  ",
@@ -191,7 +200,10 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
           country_name,
           region_code,
           region_name,
-          city_name
+          city_name,
+          browser_name,
+          device_type,
+          operating_system_name
         FROM pageviews
       `)
       .get();
@@ -208,6 +220,11 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
           regionName: row?.region_name,
           cityName: row?.city_name,
         },
+        technology: {
+          browserName: row?.browser_name,
+          deviceType: row?.device_type,
+          operatingSystemName: row?.operating_system_name,
+        },
       },
       {
         siteId,
@@ -221,11 +238,70 @@ test("POST resolves the Origin hostname and persists normalized data at receipt 
           regionName: "England",
           cityName: "London",
         },
+        technology: {
+          browserName: "Chrome",
+          deviceType: "desktop",
+          operatingSystemName: "Windows",
+        },
       },
     );
     assert.ok((row?.occurred_at as number) >= before);
     assert.ok((row?.occurred_at as number) <= after);
     assert.equal(JSON.stringify(row).includes("81.2.69.142"), false);
+    assert.equal(JSON.stringify(row).includes("Mozilla/5.0"), false);
+  });
+});
+
+test("persists null technology for missing and unrecognized user agents", async () => {
+  await withRouteDatabase(async (database) => {
+    registerPersonalSite(database);
+
+    for (const [index, userAgent] of [null, "not-a-user-agent"].entries()) {
+      const response = await POST(
+        postRequest({
+          origin: registeredOrigin,
+          contentType: "application/json",
+          userAgent,
+          body: jsonBody({ visitorId: `visitor-${index}`, path: "/" }),
+        }),
+      );
+
+      assert.equal(response.status, 204);
+      assertCors(response, registeredOrigin);
+    }
+
+    assert.deepEqual(
+      database
+        .prepare(`
+          SELECT
+            browser_name,
+            device_type,
+            operating_system_name
+          FROM pageviews
+          ORDER BY id ASC
+        `)
+        .all()
+        .map((row) => ({ ...row })),
+      [
+        {
+          browser_name: null,
+          device_type: null,
+          operating_system_name: null,
+        },
+        {
+          browser_name: null,
+          device_type: null,
+          operating_system_name: null,
+        },
+      ],
+    );
+    assert.equal(
+      database
+        .prepare("PRAGMA table_info(pageviews)")
+        .all()
+        .some((row) => /user.agent|user_agent|ua$/i.test(row.name as string)),
+      false,
+    );
   });
 });
 
