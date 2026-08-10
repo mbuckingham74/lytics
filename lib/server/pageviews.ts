@@ -39,6 +39,11 @@ export type RankedReferrer = {
   pageviews: number;
 };
 
+export type RankedReferrerBySessions = {
+  referrer: string | null;
+  sessions: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -764,5 +769,69 @@ export function getRankedReferrers(
     .map((row) => ({
       referrer: row.referrer as string | null,
       pageviews: row.pageviews as number,
+    }));
+}
+
+export function getRankedReferrersBySessions(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedReferrerBySessions[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked referrers by sessions start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked referrers by sessions end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked referrers by sessions start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          referrer,
+          occurred_at,
+          CASE
+            WHEN lag(occurred_at) OVER (
+              PARTITION BY visitor_id
+              ORDER BY occurred_at ASC, id ASC
+            ) IS NULL
+              OR occurred_at - lag(occurred_at) OVER (
+                PARTITION BY visitor_id
+                ORDER BY occurred_at ASC, id ASC
+              ) >= 1800000
+            THEN 1
+            ELSE 0
+          END AS begins_session
+        FROM pageviews
+        WHERE site_id = ?
+      )
+      SELECT referrer, count(*) AS sessions
+      FROM ordered_pageviews
+      WHERE begins_session = 1
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY referrer
+      ORDER BY
+        sessions DESC,
+        referrer IS NOT NULL ASC,
+        referrer COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      referrer: row.referrer as string | null,
+      sessions: row.sessions as number,
     }));
 }

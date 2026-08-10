@@ -16,10 +16,12 @@ import {
   getRankedPages,
   getRankedPagesBySessions,
   getRankedReferrers,
+  getRankedReferrersBySessions,
   getSessionCount,
   initializePageviews,
   recordPageview,
 } from "./pageviews";
+import type { RankedReferrerBySessions } from "./pageviews";
 import { initializeSites, registerSite } from "./sites";
 
 function withTemporaryDatabase(
@@ -2084,6 +2086,274 @@ test("rejects invalid ranked-referrer dates and non-increasing ranges", () => {
           endAt: startAt,
         }),
       /start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("ranks session entry referrers once while preserving raw referrer counts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, referrer, occurredAt] of [
+      [siteId, "visitor-1", "newsletter", "2026-08-09T12:50:00.000Z"],
+      [siteId, "visitor-1", "search", "2026-08-09T12:00:00.000Z"],
+      [siteId, "visitor-1", "later-change", "2026-08-09T12:10:00.000Z"],
+      [siteId, "visitor-2", "search", "2026-08-09T12:05:00.000Z"],
+      [siteId, "visitor-2", "ignored-later", "2026-08-09T12:20:00.000Z"],
+      [otherSiteId, "visitor-1", "other-site", "2026-08-09T12:30:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        referrer,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    const range = {
+      siteId,
+      startAt: new Date("2026-08-09T12:00:00.000Z"),
+      endAt: new Date("2026-08-09T13:00:00.000Z"),
+    };
+    const rankedReferrers: RankedReferrerBySessions[] =
+      getRankedReferrersBySessions(database, range);
+
+    assert.deepEqual(rankedReferrers, [
+      { referrer: "search", sessions: 2 },
+      { referrer: "newsletter", sessions: 1 },
+    ]);
+    assert.deepEqual(getRankedReferrers(database, range), [
+      { referrer: "search", pageviews: 2 },
+      { referrer: "ignored-later", pageviews: 1 },
+      { referrer: "later-change", pageviews: 1 },
+      { referrer: "newsletter", pageviews: 1 },
+    ]);
+  });
+});
+
+test("matches chronological insertion when using per-visitor occurrence order and exact boundaries", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const baseTime = Date.parse("2026-08-09T12:00:00.000Z");
+
+    for (const [visitorId, referrer, offset] of [
+      ["chronological", "repeat", 0],
+      ["chronological", "repeat", 1_799_999],
+      ["chronological", "repeat", 3_599_999],
+      ["out-of-order", "repeat", 3_599_999],
+      ["out-of-order", "repeat", 0],
+      ["visitor-2", "isolated", 900_000],
+      ["out-of-order", "repeat", 1_799_999],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        referrer,
+        occurredAt: new Date(baseTime + offset),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedReferrersBySessions(database, {
+        siteId,
+        startAt: new Date(baseTime),
+        endAt: new Date(baseTime + 4_000_000),
+      }),
+      [
+        { referrer: "repeat", sessions: 4 },
+        { referrer: "isolated", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("uses lower pageview ID for entry attribution at identical timestamps", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const occurredAt = new Date("2026-08-09T12:30:00.000Z");
+
+    recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/",
+      referrer: "lower-id",
+      occurredAt,
+    });
+    recordPageview(database, {
+      siteId,
+      visitorId: "visitor-1",
+      path: "/",
+      referrer: "higher-id",
+      occurredAt,
+    });
+
+    assert.deepEqual(
+      getRankedReferrersBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [{ referrer: "lower-id", sessions: 1 }],
+    );
+  });
+});
+
+test("selects session entry referrers by full-history starts in a half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, referrer, occurredAt] of [
+      ["before", "excluded-before", "2026-08-09T11:50:00.000Z"],
+      ["before", "excluded-continuation", "2026-08-09T12:10:00.000Z"],
+      ["start", "included-start", "2026-08-09T12:00:00.000Z"],
+      ["start", "ignored-later", "2026-08-09T12:20:00.000Z"],
+      ["end", "excluded-end", "2026-08-09T13:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        referrer,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedReferrersBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [{ referrer: "included-start", sessions: 1 }],
+    );
+  });
+});
+
+test("returns every tied session referrer with null first and binary ordering", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const referrers = [
+      undefined,
+      "alpha",
+      "Alpha",
+      "beta",
+      "delta",
+      "epsilon",
+      "eta",
+      "gamma",
+      "iota",
+      "kappa",
+      "theta",
+      "zeta",
+    ] as const;
+
+    for (const [index, referrer] of referrers.entries()) {
+      recordPageview(database, {
+        siteId,
+        visitorId: `visitor-${index}`,
+        path: "/",
+        referrer,
+        occurredAt: new Date("2026-08-09T12:30:00.000Z"),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedReferrersBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { referrer: null, sessions: 1 },
+        { referrer: "Alpha", sessions: 1 },
+        { referrer: "alpha", sessions: 1 },
+        { referrer: "beta", sessions: 1 },
+        { referrer: "delta", sessions: 1 },
+        { referrer: "epsilon", sessions: 1 },
+        { referrer: "eta", sessions: 1 },
+        { referrer: "gamma", sessions: 1 },
+        { referrer: "iota", sessions: 1 },
+        { referrer: "kappa", sessions: 1 },
+        { referrer: "theta", sessions: 1 },
+        { referrer: "zeta", sessions: 1 },
+      ],
+    );
+  });
+});
+
+test("returns no session-ranked referrers when no session starts qualify", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedReferrersBySessions(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid session-ranked-referrer dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedReferrersBySessions(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message:
+          "Ranked referrers by sessions start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedReferrersBySessions(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked referrers by sessions end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedReferrersBySessions(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked referrers by sessions start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedReferrersBySessions(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked referrers by sessions start time must be earlier than end time",
+      },
     );
   });
 });
