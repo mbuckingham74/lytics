@@ -77,6 +77,11 @@ export type RankedBrowserByVisitors = {
   visitors: number;
 };
 
+export type RankedDeviceTypeByVisitors = {
+  deviceType: string | null;
+  visitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -1205,6 +1210,53 @@ export function getRankedBrowsersByVisitors(
     .all(input.siteId, startAt, endAt)
     .map((row) => ({
       browserName: row.browser_name as string | null,
+      visitors: row.visitors as number,
+    }));
+}
+
+export function getRankedDeviceTypesByVisitors(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedDeviceTypeByVisitors[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked device types by visitors start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked device types by visitors end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked device types by visitors start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT
+        device_type,
+        count(DISTINCT visitor_id) AS visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY device_type COLLATE BINARY
+      ORDER BY
+        visitors DESC,
+        device_type IS NOT NULL ASC,
+        device_type COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      deviceType: row.device_type as string | null,
       visitors: row.visitors as number,
     }));
 }

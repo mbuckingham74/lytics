@@ -14,6 +14,7 @@ import {
   getRankedBrowsersByVisitors,
   getRankedCitiesByVisitors,
   getRankedCountriesByVisitors,
+  getRankedDeviceTypesByVisitors,
   getRankedEntryPages,
   getRankedExitPages,
   getRankedPages,
@@ -29,6 +30,7 @@ import type {
   RankedBrowserByVisitors,
   RankedCityByVisitors,
   RankedCountryByVisitors,
+  RankedDeviceTypeByVisitors,
   RankedRegionByVisitors,
   RankedReferrerBySessions,
 } from "./pageviews";
@@ -3398,6 +3400,136 @@ test("rejects invalid browser-ranking dates and ranges", () => {
       {
         message:
           "Ranked browsers by visitors start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks stored device types by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, deviceType, occurredAt] of [
+      [siteId, "mobile-repeat", "mobile", "2026-08-09T12:05:00.000Z"],
+      [siteId, "mobile-repeat", "mobile", "2026-08-09T12:06:00.000Z"],
+      [siteId, "shared", "mobile", "2026-08-09T12:10:00.000Z"],
+      [siteId, "mobile-only", "mobile", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "tablet", "2026-08-09T12:20:00.000Z"],
+      [siteId, "tablet-only", "tablet", "2026-08-09T12:25:00.000Z"],
+      [siteId, "desktop-one", "Desktop", "2026-08-09T12:30:00.000Z"],
+      [siteId, "desktop-two", "Desktop", "2026-08-09T12:31:00.000Z"],
+      [siteId, "lower-one", "desktop", "2026-08-09T12:32:00.000Z"],
+      [siteId, "lower-two", "desktop", "2026-08-09T12:33:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:40:00.000Z"],
+      [siteId, "unknown-repeat", null, "2026-08-09T12:41:00.000Z"],
+      [siteId, "unknown-two", null, "2026-08-09T12:45:00.000Z"],
+      [siteId, "start-boundary", "console", "2026-08-09T12:00:00.000Z"],
+      [siteId, "end-boundary", "television", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "wearable", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "mobile", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "mobile", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        technology: {
+          browserName: null,
+          deviceType,
+          operatingSystemName: null,
+        },
+      });
+    }
+
+    const rankedDeviceTypes: RankedDeviceTypeByVisitors[] =
+      getRankedDeviceTypesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedDeviceTypes, [
+      { deviceType: "mobile", visitors: 3 },
+      { deviceType: null, visitors: 2 },
+      { deviceType: "Desktop", visitors: 2 },
+      { deviceType: "desktop", visitors: 2 },
+      { deviceType: "tablet", visitors: 2 },
+      { deviceType: "console", visitors: 1 },
+    ]);
+  });
+});
+
+test("returns no ranked device types when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedDeviceTypesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid device-type-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedDeviceTypesByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message:
+          "Ranked device types by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedDeviceTypesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked device types by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedDeviceTypesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked device types by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedDeviceTypesByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked device types by visitors start time must be earlier than end time",
       },
     );
   });
