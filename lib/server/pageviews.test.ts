@@ -7,6 +7,7 @@ import test from "node:test";
 import { openDatabase } from "./database";
 import {
   getActiveVisitorCount,
+  getAverageSessionDuration,
   getBounceRate,
   getPagesPerSession,
   getPageviewSummary,
@@ -828,6 +829,162 @@ test("rejects invalid bounce-rate dates and non-increasing ranges", () => {
           endAt: startAt,
         }),
       /bounce rate start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("averages session durations in seconds including one-page sessions", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, occurredAt] of [
+      [siteId, "multi-page", "2026-08-09T12:00:10.000Z"],
+      [siteId, "one-page-1", "2026-08-09T12:10:00.000Z"],
+      [siteId, "multi-page", "2026-08-09T12:00:00.000Z"],
+      [siteId, "one-page-2", "2026-08-09T12:20:00.000Z"],
+      [otherSiteId, "other-site", "2026-08-09T12:00:00.000Z"],
+      [otherSiteId, "other-site", "2026-08-09T12:20:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getAverageSessionDuration(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      10 / 3,
+    );
+  });
+});
+
+test("starts a new duration session at an exact thirty-minute gap without rounding", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const occurredAt of [
+      "2026-08-09T12:00:00.000Z",
+      "2026-08-09T12:29:59.999Z",
+      "2026-08-09T12:59:59.999Z",
+    ]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: "visitor-1",
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getAverageSessionDuration(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      899.9995,
+    );
+  });
+});
+
+test("attributes complete session durations to starts within the half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, occurredAt] of [
+      ["crosses-start", "2026-08-09T11:50:00.000Z"],
+      ["crosses-start", "2026-08-09T12:10:00.000Z"],
+      ["starts-at-start", "2026-08-09T12:00:00.000Z"],
+      ["starts-at-start", "2026-08-09T12:05:00.000Z"],
+      ["crosses-end", "2026-08-09T12:50:00.000Z"],
+      ["crosses-end", "2026-08-09T13:10:00.000Z"],
+      ["starts-at-end", "2026-08-09T13:00:00.000Z"],
+      ["starts-at-end", "2026-08-09T13:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getAverageSessionDuration(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      750,
+    );
+  });
+});
+
+test("returns zero average session duration when the range has no session starts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.equal(
+      getAverageSessionDuration(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      0,
+    );
+  });
+});
+
+test("rejects invalid average-duration dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getAverageSessionDuration(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      /average session duration start time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getAverageSessionDuration(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      /average session duration end time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getAverageSessionDuration(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      /average session duration start time must be earlier than end time/i,
+    );
+    assert.throws(
+      () =>
+        getAverageSessionDuration(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      /average session duration start time must be earlier than end time/i,
     );
   });
 });
