@@ -63,3 +63,17 @@ export function listSites(database: DatabaseSync): Site[] {
     .all()
     .map(toSite);
 }
+
+export function findSiteByDomain(
+  database: DatabaseSync,
+  domain: string,
+): Site | null {
+  const normalizedDomain = domain.trim().toLowerCase();
+  const row = database
+    .prepare(
+      "SELECT id, name, domain FROM sites WHERE domain = ? COLLATE NOCASE",
+    )
+    .get(normalizedDomain);
+
+  return row ? toSite(row) : null;
+}

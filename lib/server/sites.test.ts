@@ -5,7 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { openDatabase } from "./database";
-import { initializeSites, listSites, registerSite } from "./sites";
+import {
+  findSiteByDomain,
+  initializeSites,
+  listSites,
+  registerSite,
+} from "./sites";
 
 function withTemporaryDatabase(
   run: (database: ReturnType<typeof openDatabase>, filePath: string) => void,
@@ -127,5 +132,25 @@ test("rejects domains that differ only by letter case", () => {
     assert.deepEqual(listSites(database), [
       { id: 1, name: "Personal Site", domain: "personal.example" },
     ]);
+  });
+});
+
+test("finds sites by exact case-insensitive normalized domain", () => {
+  withTemporaryDatabase((database) => {
+    initializeSites(database);
+    const apex = registerSite(database, {
+      name: "Apex",
+      domain: "example.com",
+    });
+    const www = registerSite(database, {
+      name: "WWW",
+      domain: "www.example.com",
+    });
+
+    assert.deepEqual(findSiteByDomain(database, "  EXAMPLE.COM  "), apex);
+    assert.deepEqual(findSiteByDomain(database, "WWW.Example.Com"), www);
+    assert.equal(findSiteByDomain(database, "sub.example.com"), null);
+    assert.equal(findSiteByDomain(database, "notexample.com"), null);
+    assert.equal(findSiteByDomain(database, ""), null);
   });
 });
