@@ -19,6 +19,11 @@ export type RankedPage = {
   pageviews: number;
 };
 
+export type RankedEntryPage = {
+  path: string;
+  sessions: number;
+};
+
 export type RankedReferrer = {
   referrer: string | null;
   pageviews: number;
@@ -480,6 +485,63 @@ export function getRankedPages(
     .map((row) => ({
       path: row.path as string,
       pageviews: row.pageviews as number,
+    }));
+}
+
+export function getRankedEntryPages(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedEntryPage[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Ranked entry pages start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Ranked entry pages end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked entry pages start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          path,
+          occurred_at,
+          CASE
+            WHEN lag(occurred_at) OVER (
+              PARTITION BY visitor_id
+              ORDER BY occurred_at ASC, id ASC
+            ) IS NULL
+              OR occurred_at - lag(occurred_at) OVER (
+                PARTITION BY visitor_id
+                ORDER BY occurred_at ASC, id ASC
+              ) >= 1800000
+            THEN 1
+            ELSE 0
+          END AS begins_session
+        FROM pageviews
+        WHERE site_id = ?
+      )
+      SELECT path, count(*) AS sessions
+      FROM ordered_pageviews
+      WHERE begins_session = 1
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY path
+      ORDER BY sessions DESC, path COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      path: row.path as string,
+      sessions: row.sessions as number,
     }));
 }
 
