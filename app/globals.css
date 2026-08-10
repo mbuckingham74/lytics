@@ -591,6 +591,22 @@ h1 {
   max-width: 900px;
 }
 
+.geography-section {
+  padding-top: 24px;
+}
+
+.geography-rankings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.geography-ranking-label {
+  display: block;
+  line-height: 1.35;
+}
+
 .ranking-panel {
   min-width: 0;
   padding: 17px 16px 12px;
@@ -980,7 +996,8 @@ h1 {
 }
 
 @media (max-width: 1100px) {
-  .pages-rankings-grid {
+  .pages-rankings-grid,
+  .geography-rankings-grid {
     grid-template-columns: 1fr;
   }
 }
