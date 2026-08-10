@@ -298,6 +298,11 @@ h1 {
   color: #d77d7d;
 }
 
+.kpi-comparison.neutral {
+  color: #747d78;
+  font-weight: 500;
+}
+
 .trend-panel {
   min-width: 0;
   margin: 10px 0 0;
@@ -491,6 +496,91 @@ h1 {
 .ranking-label {
   position: relative;
   overflow-wrap: anywhere;
+}
+
+.ranking-table .ranking-empty {
+  height: 88px;
+  color: #68716c;
+  font-size: 11px;
+  text-align: center;
+}
+
+.overview-empty-content {
+  min-height: 100vh;
+}
+
+.overview-onboarding {
+  max-width: 720px;
+  min-height: 390px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  margin-top: 30px;
+  padding: 48px 28px;
+  border: 1px solid #222724;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 18%, rgb(72 199 135 / 8%), transparent 34%),
+    #101311;
+  text-align: center;
+}
+
+.onboarding-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border: 1px solid #28533c;
+  border-radius: 10px;
+  background: #173524;
+  color: #72d6a0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.onboarding-eyebrow {
+  margin-bottom: 7px;
+  color: #65c590;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overview-onboarding h2 {
+  margin: 0 0 9px;
+  color: #f0f3f1;
+  font-size: 21px;
+  letter-spacing: -0.025em;
+}
+
+.onboarding-copy {
+  max-width: 380px;
+  margin-bottom: 20px;
+  color: #858e89;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.onboarding-link {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid #347655;
+  border-radius: 7px;
+  background: #236743;
+  color: #effff6;
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.onboarding-link:hover {
+  background: #28764d;
 }
 
 .visually-hidden {
