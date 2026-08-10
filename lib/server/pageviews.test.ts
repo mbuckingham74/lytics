@@ -10,6 +10,7 @@ import {
   getPageviewSummary,
   getRankedPages,
   getRankedReferrers,
+  getSessionCount,
   initializePageviews,
   recordPageview,
 } from "./pageviews";
@@ -358,6 +359,160 @@ test("rejects invalid summary dates and non-increasing ranges", () => {
     assert.throws(
       () =>
         getPageviewSummary(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      /start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("counts sessions independently by visitor and site using occurrence order", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, occurredAt] of [
+      [siteId, "visitor-1", "2026-08-09T12:20:00.000Z"],
+      [siteId, "visitor-1", "2026-08-09T12:00:00.000Z"],
+      [siteId, "visitor-1", "2026-08-09T12:49:59.999Z"],
+      [siteId, "visitor-2", "2026-08-09T12:05:00.000Z"],
+      [siteId, "visitor-2", "2026-08-09T12:34:59.999Z"],
+      [otherSiteId, "visitor-1", "2026-08-09T12:30:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getSessionCount(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      2,
+    );
+  });
+});
+
+test("starts a new session at an exact thirty-minute gap", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const occurredAt of [
+      "2026-08-09T12:00:00.000Z",
+      "2026-08-09T12:30:00.000Z",
+      "2026-08-09T12:59:59.999Z",
+    ]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: "visitor-1",
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getSessionCount(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      2,
+    );
+  });
+});
+
+test("attributes sessions to starts within the half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, occurredAt] of [
+      ["crosses-start", "2026-08-09T11:50:00.000Z"],
+      ["crosses-start", "2026-08-09T12:10:00.000Z"],
+      ["starts-at-start", "2026-08-09T12:00:00.000Z"],
+      ["crosses-end", "2026-08-09T12:50:00.000Z"],
+      ["crosses-end", "2026-08-09T13:10:00.000Z"],
+      ["starts-at-end", "2026-08-09T13:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getSessionCount(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      2,
+    );
+  });
+});
+
+test("returns zero sessions when the range has no session starts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.equal(
+      getSessionCount(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      0,
+    );
+  });
+});
+
+test("rejects invalid session-count dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getSessionCount(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      /start time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getSessionCount(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      /end time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getSessionCount(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      /start time must be earlier than end time/i,
+    );
+    assert.throws(
+      () =>
+        getSessionCount(database, {
           siteId,
           startAt: endAt,
           endAt: startAt,

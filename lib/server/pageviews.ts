@@ -135,6 +135,55 @@ export function getPageviewSummary(
   };
 }
 
+export function getSessionCount(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): number {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Session count start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Session count end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error("Session count start time must be earlier than end time");
+  }
+
+  const row = database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          occurred_at,
+          lag(occurred_at) OVER (
+            PARTITION BY visitor_id
+            ORDER BY occurred_at ASC, id ASC
+          ) AS previous_occurred_at
+        FROM pageviews
+        WHERE site_id = ?
+      )
+      SELECT count(*) AS sessions
+      FROM ordered_pageviews
+      WHERE occurred_at >= ?
+        AND occurred_at < ?
+        AND (
+          previous_occurred_at IS NULL
+          OR occurred_at - previous_occurred_at >= 1800000
+        )
+    `)
+    .get(input.siteId, startAt, endAt);
+
+  if (!row) {
+    throw new Error("Session count query did not return a result");
+  }
+
+  return row.sessions as number;
+}
+
 export function getActiveVisitorCount(
   database: DatabaseSync,
   input: { siteId: number; nowAt: Date },
