@@ -261,6 +261,84 @@ export function getPagesPerSession(
   return row.pages_per_session as number;
 }
 
+export function getBounceRate(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): number {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Bounce rate start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Bounce rate end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error("Bounce rate start time must be earlier than end time");
+  }
+
+  const row = database
+    .prepare(`
+      WITH ordered_pageviews AS (
+        SELECT
+          id,
+          visitor_id,
+          occurred_at,
+          CASE
+            WHEN lag(occurred_at) OVER (
+              PARTITION BY visitor_id
+              ORDER BY occurred_at ASC, id ASC
+            ) IS NULL
+              OR occurred_at - lag(occurred_at) OVER (
+                PARTITION BY visitor_id
+                ORDER BY occurred_at ASC, id ASC
+              ) >= 1800000
+            THEN 1
+            ELSE 0
+          END AS begins_session
+        FROM pageviews
+        WHERE site_id = ?
+      ),
+      identified_pageviews AS (
+        SELECT
+          visitor_id,
+          occurred_at,
+          sum(begins_session) OVER (
+            PARTITION BY visitor_id
+            ORDER BY occurred_at ASC, id ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS session_number
+        FROM ordered_pageviews
+      ),
+      sessions AS (
+        SELECT
+          visitor_id,
+          session_number,
+          min(occurred_at) AS started_at,
+          count(*) AS pageviews
+        FROM identified_pageviews
+        GROUP BY visitor_id, session_number
+      )
+      SELECT coalesce(
+        100.0 * sum(CASE WHEN pageviews = 1 THEN 1 ELSE 0 END) / count(*),
+        0
+      ) AS bounce_rate
+      FROM sessions
+      WHERE started_at >= ?
+        AND started_at < ?
+    `)
+    .get(input.siteId, startAt, endAt);
+
+  if (!row) {
+    throw new Error("Bounce rate query did not return a result");
+  }
+
+  return row.bounce_rate as number;
+}
+
 export function getActiveVisitorCount(
   database: DatabaseSync,
   input: { siteId: number; nowAt: Date },

@@ -7,6 +7,7 @@ import test from "node:test";
 import { openDatabase } from "./database";
 import {
   getActiveVisitorCount,
+  getBounceRate,
   getPagesPerSession,
   getPageviewSummary,
   getRankedPages,
@@ -673,6 +674,160 @@ test("rejects invalid pages-per-session dates and non-increasing ranges", () => 
           endAt: startAt,
         }),
       /pages per session start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("calculates bounce rate independently by visitor and site using occurrence order and raw pageviews", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, visitorId, occurredAt] of [
+      [siteId, "visitor-1", "2026-08-09T12:20:00.000Z"],
+      [siteId, "visitor-2", "2026-08-09T12:10:00.000Z"],
+      [siteId, "visitor-1", "2026-08-09T12:00:00.000Z"],
+      [otherSiteId, "visitor-1", "2026-08-09T12:40:00.000Z"],
+      [siteId, "visitor-1", "2026-08-09T12:49:59.999Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/repeated",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getBounceRate(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      50,
+    );
+  });
+});
+
+test("starts a new bounce-rate session at an exact thirty-minute gap without rounding", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, occurredAt] of [
+      ["below-boundary", "2026-08-09T12:29:59.999Z"],
+      ["exact-boundary", "2026-08-09T12:30:00.000Z"],
+      ["below-boundary", "2026-08-09T12:00:00.000Z"],
+      ["exact-boundary", "2026-08-09T12:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getBounceRate(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      200 / 3,
+    );
+  });
+});
+
+test("attributes complete bounce-rate sessions to starts within the half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, occurredAt] of [
+      ["crosses-start", "2026-08-09T11:50:00.000Z"],
+      ["crosses-start", "2026-08-09T12:10:00.000Z"],
+      ["starts-at-start", "2026-08-09T12:00:00.000Z"],
+      ["crosses-end", "2026-08-09T12:50:00.000Z"],
+      ["starts-at-end", "2026-08-09T13:00:00.000Z"],
+      ["crosses-end", "2026-08-09T13:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(
+      getBounceRate(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      50,
+    );
+  });
+});
+
+test("returns zero bounce rate when the range has no session starts", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.equal(
+      getBounceRate(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      0,
+    );
+  });
+});
+
+test("rejects invalid bounce-rate dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getBounceRate(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      /bounce rate start time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getBounceRate(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      /bounce rate end time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getBounceRate(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      /bounce rate start time must be earlier than end time/i,
+    );
+    assert.throws(
+      () =>
+        getBounceRate(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      /bounce rate start time must be earlier than end time/i,
     );
   });
 });
