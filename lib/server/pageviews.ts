@@ -135,6 +135,34 @@ export function getPageviewSummary(
   };
 }
 
+export function getActiveVisitorCount(
+  database: DatabaseSync,
+  input: { siteId: number; nowAt: Date },
+): number {
+  const nowAt = input.nowAt.getTime();
+
+  if (!Number.isFinite(nowAt)) {
+    throw new Error("Active-visitor time must be a valid date");
+  }
+
+  const activeSince = nowAt - 5 * 60 * 1000;
+  const row = database
+    .prepare(`
+      SELECT count(DISTINCT visitor_id) AS active_visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at <= ?
+    `)
+    .get(input.siteId, activeSince, nowAt);
+
+  if (!row) {
+    throw new Error("Active-visitor query did not return a result");
+  }
+
+  return row.active_visitors as number;
+}
+
 export function getRankedPages(
   database: DatabaseSync,
   input: { siteId: number; startAt: Date; endAt: Date },

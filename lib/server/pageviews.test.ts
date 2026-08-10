@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { openDatabase } from "./database";
 import {
+  getActiveVisitorCount,
   getPageviewSummary,
   getRankedPages,
   getRankedReferrers,
@@ -362,6 +363,66 @@ test("rejects invalid summary dates and non-increasing ranges", () => {
           endAt: startAt,
         }),
       /start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("counts distinct active visitors for only the requested site in the inclusive five-minute window", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+    const nowAt = new Date("2026-08-09T12:05:00.000Z");
+
+    for (const [pageviewSiteId, visitorId, occurredAt] of [
+      [siteId, "before-window", "2026-08-09T11:59:59.999Z"],
+      [siteId, "boundary-visitor", "2026-08-09T12:00:00.000Z"],
+      [siteId, "repeated-visitor", "2026-08-09T12:01:00.000Z"],
+      [siteId, "repeated-visitor", "2026-08-09T12:02:00.000Z"],
+      [siteId, "visitor-2", "2026-08-09T12:05:00.000Z"],
+      [siteId, "after-now", "2026-08-09T12:05:00.001Z"],
+      [siteId, "future", "2026-08-09T13:00:00.000Z"],
+      [otherSiteId, "other-site", "2026-08-09T12:03:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.equal(getActiveVisitorCount(database, { siteId, nowAt }), 3);
+  });
+});
+
+test("returns zero active visitors when no pageviews qualify", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.equal(
+      getActiveVisitorCount(database, {
+        siteId,
+        nowAt: new Date("2026-08-09T12:05:00.000Z"),
+      }),
+      0,
+    );
+  });
+});
+
+test("rejects an invalid active-visitor time", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.throws(
+      () =>
+        getActiveVisitorCount(database, {
+          siteId,
+          nowAt: new Date(Number.NaN),
+        }),
+      /active-visitor time must be a valid date/i,
     );
   });
 });
