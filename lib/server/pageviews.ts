@@ -47,6 +47,12 @@ export type RankedReferrerBySessions = {
   sessions: number;
 };
 
+export type RankedCountryByVisitors = {
+  countryCode: string | null;
+  countryName: string | null;
+  visitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -910,5 +916,58 @@ export function getRankedReferrersBySessions(
     .map((row) => ({
       referrer: row.referrer as string | null,
       sessions: row.sessions as number,
+    }));
+}
+
+export function getRankedCountriesByVisitors(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedCountryByVisitors[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error(
+      "Ranked countries by visitors start time must be a valid date",
+    );
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error(
+      "Ranked countries by visitors end time must be a valid date",
+    );
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Ranked countries by visitors start time must be earlier than end time",
+    );
+  }
+
+  return database
+    .prepare(`
+      SELECT
+        country_code,
+        CASE
+          WHEN country_code IS NULL THEN NULL
+          ELSE min(country_name COLLATE BINARY)
+        END AS selected_country_name,
+        count(DISTINCT visitor_id) AS visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY country_code
+      ORDER BY
+        visitors DESC,
+        country_code IS NOT NULL ASC,
+        selected_country_name COLLATE BINARY ASC,
+        country_code COLLATE BINARY ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      countryCode: row.country_code as string | null,
+      countryName: row.selected_country_name as string | null,
+      visitors: row.visitors as number,
     }));
 }

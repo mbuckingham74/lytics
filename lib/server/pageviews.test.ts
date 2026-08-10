@@ -11,6 +11,7 @@ import {
   getBounceRate,
   getPagesPerSession,
   getPageviewSummary,
+  getRankedCountriesByVisitors,
   getRankedEntryPages,
   getRankedExitPages,
   getRankedPages,
@@ -21,7 +22,10 @@ import {
   initializePageviews,
   recordPageview,
 } from "./pageviews";
-import type { RankedReferrerBySessions } from "./pageviews";
+import type {
+  RankedCountryByVisitors,
+  RankedReferrerBySessions,
+} from "./pageviews";
 import { initializeSites, registerSite } from "./sites";
 
 function withTemporaryDatabase(
@@ -2636,6 +2640,142 @@ test("rejects invalid session-ranked-referrer dates and ranges", () => {
       {
         message:
           "Ranked referrers by sessions start time must be earlier than end time",
+      },
+    );
+  });
+});
+
+test("ranks countries by distinct visitors within one site and half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [
+      pageviewSiteId,
+      visitorId,
+      countryCode,
+      countryName,
+      occurredAt,
+    ] of [
+      [siteId, "gb-repeat", "GB", "United Kingdom", "2026-08-09T12:05:00.000Z"],
+      [siteId, "gb-repeat", "GB", "UK", "2026-08-09T12:10:00.000Z"],
+      [siteId, "gb-repeat", "GB", null, "2026-08-09T12:12:00.000Z"],
+      [siteId, "gb-second", "GB", "Britain", "2026-08-09T12:15:00.000Z"],
+      [siteId, "shared", "GB", "United Kingdom", "2026-08-09T12:20:00.000Z"],
+      [siteId, "us-only", "US", "United States", "2026-08-09T12:25:00.000Z"],
+      [siteId, "shared", "US", "USA", "2026-08-09T12:30:00.000Z"],
+      [siteId, "de-one", "DE", "Germany", "2026-08-09T12:35:00.000Z"],
+      [siteId, "de-two", "DE", "Germany", "2026-08-09T12:40:00.000Z"],
+      [siteId, "unknown-repeat", null, null, "2026-08-09T12:45:00.000Z"],
+      [siteId, "unknown-repeat", null, "Mystery", "2026-08-09T12:46:00.000Z"],
+      [siteId, "unknown-two", null, null, "2026-08-09T12:50:00.000Z"],
+      [siteId, "start-boundary", "JP", "Japan", "2026-08-09T12:00:00.000Z"],
+      [siteId, "end-boundary", "FR", "France", "2026-08-09T13:00:00.000Z"],
+      [siteId, "before-range", "CA", "Canada", "2026-08-09T11:59:59.999Z"],
+      [otherSiteId, "other-one", "GB", "United Kingdom", "2026-08-09T12:05:00.000Z"],
+      [otherSiteId, "other-two", "GB", "United Kingdom", "2026-08-09T12:10:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+        geography: {
+          countryCode,
+          countryName,
+          regionCode: null,
+          regionName: null,
+          cityName: null,
+        },
+      });
+    }
+
+    const rankedCountries: RankedCountryByVisitors[] =
+      getRankedCountriesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      });
+
+    assert.deepEqual(rankedCountries, [
+      { countryCode: "GB", countryName: "Britain", visitors: 3 },
+      { countryCode: null, countryName: null, visitors: 2 },
+      { countryCode: "DE", countryName: "Germany", visitors: 2 },
+      { countryCode: "US", countryName: "USA", visitors: 2 },
+      { countryCode: "JP", countryName: "Japan", visitors: 1 },
+    ]);
+  });
+});
+
+test("returns no ranked countries when no pageviews match", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedCountriesByVisitors(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid country-ranking dates and ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedCountriesByVisitors(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      {
+        message:
+          "Ranked countries by visitors start time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCountriesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      {
+        message: "Ranked countries by visitors end time must be a valid date",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCountriesByVisitors(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      {
+        message:
+          "Ranked countries by visitors start time must be earlier than end time",
+      },
+    );
+    assert.throws(
+      () =>
+        getRankedCountriesByVisitors(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      {
+        message:
+          "Ranked countries by visitors start time must be earlier than end time",
       },
     );
   });
