@@ -1,3 +1,5 @@
+import { DashboardShell } from "./dashboard-shell";
+
 const overviewMetrics = [
   { label: "Unique visitors", value: "12,842", comparison: "+12.4% vs prior period", tone: "positive" },
   { label: "Sessions", value: "15,907", comparison: "+8.2% vs prior period", tone: "positive" },
@@ -35,8 +37,6 @@ const pages = [
   { label: "/contact", sessions: 704 },
 ] as const;
 
-const navigationItems = ["Overview", "Pages", "Referrers", "Geography", "Technology", "Realtime"];
-
 export default function Home() {
   const chartWidth = 600;
   const chartHeight = 200;
@@ -53,33 +53,7 @@ export default function Home() {
   const areaPath = `M 0 ${chartBottom} L ${points.map((point) => `${point.x} ${point.y}`).join(" L ")} L ${chartWidth} ${chartBottom} Z`;
 
   return (
-    <div className="dashboard-shell">
-      <aside className="sidebar" aria-label="Dashboard sidebar">
-        <div className="wordmark">Lytics</div>
-
-        <button className="site-selector" type="button" aria-label="Select website" disabled>
-          <span className="site-mark" aria-hidden="true">e</span>
-          <span className="site-copy">
-            <span className="site-caption">Website</span>
-            <span className="site-name">example.com</span>
-          </span>
-          <span className="selector-chevron" aria-hidden="true">⌄</span>
-        </button>
-
-        <nav className="primary-nav" aria-label="Analytics sections">
-          <ul>
-            {navigationItems.map((item) => (
-              <li key={item}>
-                <span className={item === "Overview" ? "nav-item selected" : "nav-item"} aria-current={item === "Overview" ? "page" : undefined}>
-                  <span className="nav-dot" aria-hidden="true" />
-                  {item}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </aside>
-
+    <DashboardShell activeSection="Overview">
       <main className="main-content">
         <header className="content-header">
           <div>
@@ -209,6 +183,6 @@ export default function Home() {
           </section>
         </section>
       </main>
-    </div>
+    </DashboardShell>
   );
 }
