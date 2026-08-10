@@ -14,6 +14,11 @@ export type PageviewSummary = {
   uniqueVisitors: number;
 };
 
+export type RankedPage = {
+  path: string;
+  pageviews: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -123,4 +128,40 @@ export function getPageviewSummary(
     pageviews: row.pageviews as number,
     uniqueVisitors: row.unique_visitors as number,
   };
+}
+
+export function getRankedPages(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): RankedPage[] {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Ranked pages start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Ranked pages end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error("Ranked pages start time must be earlier than end time");
+  }
+
+  return database
+    .prepare(`
+      SELECT path, count(*) AS pageviews
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+      GROUP BY path
+      ORDER BY pageviews DESC, path ASC
+    `)
+    .all(input.siteId, startAt, endAt)
+    .map((row) => ({
+      path: row.path as string,
+      pageviews: row.pageviews as number,
+    }));
 }

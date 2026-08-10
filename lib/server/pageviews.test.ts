@@ -7,6 +7,7 @@ import test from "node:test";
 import { openDatabase } from "./database";
 import {
   getPageviewSummary,
+  getRankedPages,
   initializePageviews,
   recordPageview,
 } from "./pageviews";
@@ -355,6 +356,163 @@ test("rejects invalid summary dates and non-increasing ranges", () => {
     assert.throws(
       () =>
         getPageviewSummary(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      /start time must be earlier than end time/i,
+    );
+  });
+});
+
+test("ranks paths by matching raw pageviews regardless of visitor", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const [visitorId, path] of [
+      ["visitor-1", "/archive"],
+      ["visitor-1", "/archive"],
+      ["visitor-2", "/archive"],
+      ["visitor-1", "/about"],
+    ]) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path,
+        occurredAt: new Date("2026-08-09T12:30:00.000Z"),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/archive", pageviews: 3 },
+        { path: "/about", pageviews: 1 },
+      ],
+    );
+  });
+});
+
+test("ranks only the requested site's paths within a half-open range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const [pageviewSiteId, path, occurredAt] of [
+      [siteId, "/before", "2026-08-09T11:59:59.999Z"],
+      [siteId, "/start", "2026-08-09T12:00:00.000Z"],
+      [siteId, "/inside", "2026-08-09T12:00:00.001Z"],
+      [siteId, "/end", "2026-08-09T13:00:00.000Z"],
+      [otherSiteId, "/other-site", "2026-08-09T12:30:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: pageviewSiteId,
+        visitorId: `${pageviewSiteId}-${path}`,
+        path,
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/inside", pageviews: 1 },
+        { path: "/start", pageviews: 1 },
+      ],
+    );
+  });
+});
+
+test("orders tied ranked pages by stored path using binary ordering", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const path of ["/alpha", "/Alpha", "/beta"]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: path,
+        path,
+        occurredAt: new Date("2026-08-09T12:30:00.000Z"),
+      });
+    }
+
+    assert.deepEqual(
+      getRankedPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [
+        { path: "/Alpha", pageviews: 1 },
+        { path: "/alpha", pageviews: 1 },
+        { path: "/beta", pageviews: 1 },
+      ],
+    );
+  });
+});
+
+test("returns no ranked pages when the range has no matches", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getRankedPages(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      [],
+    );
+  });
+});
+
+test("rejects invalid ranked-page dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getRankedPages(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      /start time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getRankedPages(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      /end time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getRankedPages(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      /start time must be earlier than end time/i,
+    );
+    assert.throws(
+      () =>
+        getRankedPages(database, {
           siteId,
           startAt: endAt,
           endAt: startAt,
