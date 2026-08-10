@@ -5,7 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { openDatabase } from "./database";
-import { initializePageviews, recordPageview } from "./pageviews";
+import {
+  getPageviewSummary,
+  initializePageviews,
+  recordPageview,
+} from "./pageviews";
 import { initializeSites, registerSite } from "./sites";
 
 function withTemporaryDatabase(
@@ -230,6 +234,132 @@ test("rejects a pageview for an unknown site", () => {
     assert.equal(
       database.prepare("SELECT count(*) AS count FROM pageviews").get()?.count,
       0,
+    );
+  });
+});
+
+test("summarizes pageviews and distinct visitors for only the requested site", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const otherSiteId = registerSite(database, {
+      name: "Other Site",
+      domain: "other.example",
+    }).id;
+
+    for (const pageview of [
+      { siteId, visitorId: "visitor-1", occurredAt: "2026-08-09T12:00:00.000Z" },
+      { siteId, visitorId: "visitor-1", occurredAt: "2026-08-09T12:30:00.000Z" },
+      { siteId, visitorId: "visitor-2", occurredAt: "2026-08-09T13:00:00.000Z" },
+      {
+        siteId: otherSiteId,
+        visitorId: "visitor-3",
+        occurredAt: "2026-08-09T13:30:00.000Z",
+      },
+    ]) {
+      recordPageview(database, {
+        siteId: pageview.siteId,
+        visitorId: pageview.visitorId,
+        path: "/",
+        occurredAt: new Date(pageview.occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getPageviewSummary(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T14:00:00.000Z"),
+      }),
+      { pageviews: 3, uniqueVisitors: 2 },
+    );
+  });
+});
+
+test("uses a start-inclusive and end-exclusive millisecond range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    for (const occurredAt of [
+      "2026-08-09T11:59:59.999Z",
+      "2026-08-09T12:00:00.000Z",
+      "2026-08-09T12:00:00.001Z",
+      "2026-08-09T13:00:00.000Z",
+    ]) {
+      recordPageview(database, {
+        siteId,
+        visitorId: occurredAt,
+        path: "/",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    assert.deepEqual(
+      getPageviewSummary(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      { pageviews: 2, uniqueVisitors: 2 },
+    );
+  });
+});
+
+test("returns zero counts for an empty matching range", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+
+    assert.deepEqual(
+      getPageviewSummary(database, {
+        siteId,
+        startAt: new Date("2026-08-09T12:00:00.000Z"),
+        endAt: new Date("2026-08-09T13:00:00.000Z"),
+      }),
+      { pageviews: 0, uniqueVisitors: 0 },
+    );
+  });
+});
+
+test("rejects invalid summary dates and non-increasing ranges", () => {
+  withTemporaryDatabase((database) => {
+    const siteId = initializeRegisteredSite(database);
+    const startAt = new Date("2026-08-09T12:00:00.000Z");
+    const endAt = new Date("2026-08-09T13:00:00.000Z");
+
+    assert.throws(
+      () =>
+        getPageviewSummary(database, {
+          siteId,
+          startAt: new Date(Number.NaN),
+          endAt,
+        }),
+      /start time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getPageviewSummary(database, {
+          siteId,
+          startAt,
+          endAt: new Date(Number.NaN),
+        }),
+      /end time must be a valid date/i,
+    );
+    assert.throws(
+      () =>
+        getPageviewSummary(database, {
+          siteId,
+          startAt,
+          endAt: new Date(startAt),
+        }),
+      /start time must be earlier than end time/i,
+    );
+    assert.throws(
+      () =>
+        getPageviewSummary(database, {
+          siteId,
+          startAt: endAt,
+          endAt: startAt,
+        }),
+      /start time must be earlier than end time/i,
     );
   });
 });

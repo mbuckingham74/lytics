@@ -9,6 +9,11 @@ export type Pageview = {
   occurredAt: Date;
 };
 
+export type PageviewSummary = {
+  pageviews: number;
+  uniqueVisitors: number;
+};
+
 type RecordPageviewInput = {
   siteId: number;
   visitorId: string;
@@ -75,4 +80,47 @@ export function recordPageview(
   }
 
   return toPageview(row);
+}
+
+export function getPageviewSummary(
+  database: DatabaseSync,
+  input: { siteId: number; startAt: Date; endAt: Date },
+): PageviewSummary {
+  const startAt = input.startAt.getTime();
+  const endAt = input.endAt.getTime();
+
+  if (!Number.isFinite(startAt)) {
+    throw new Error("Pageview summary start time must be a valid date");
+  }
+
+  if (!Number.isFinite(endAt)) {
+    throw new Error("Pageview summary end time must be a valid date");
+  }
+
+  if (startAt >= endAt) {
+    throw new Error(
+      "Pageview summary start time must be earlier than end time",
+    );
+  }
+
+  const row = database
+    .prepare(`
+      SELECT
+        count(*) AS pageviews,
+        count(DISTINCT visitor_id) AS unique_visitors
+      FROM pageviews
+      WHERE site_id = ?
+        AND occurred_at >= ?
+        AND occurred_at < ?
+    `)
+    .get(input.siteId, startAt, endAt);
+
+  if (!row) {
+    throw new Error("Pageview summary query did not return a result");
+  }
+
+  return {
+    pageviews: row.pageviews as number,
+    uniqueVisitors: row.unique_visitors as number,
+  };
 }
