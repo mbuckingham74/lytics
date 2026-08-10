@@ -17,9 +17,14 @@ export type SiteSelectorOption = {
 type SiteSelectorProps = {
   options: SiteSelectorOption[];
   selectedSiteId: number;
+  pathname?: string;
 };
 
-export function SiteSelector({ options, selectedSiteId }: SiteSelectorProps) {
+export function SiteSelector({
+  options,
+  selectedSiteId,
+  pathname = "/",
+}: SiteSelectorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [selectedValue, setSelectedValue] = useState(String(selectedSiteId));
@@ -41,6 +46,7 @@ export function SiteSelector({ options, selectedSiteId }: SiteSelectorProps) {
       siteId: selectedId,
       firstSiteId: options[0].id,
       rangePreset,
+      pathname,
     });
 
     startTransition(() => {

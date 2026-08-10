@@ -537,6 +537,17 @@ h1 {
   margin-top: 10px;
 }
 
+.pages-section {
+  padding-top: 24px;
+}
+
+.pages-rankings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
 .ranking-panel {
   min-width: 0;
   padding: 17px 16px 12px;
@@ -923,6 +934,12 @@ h1 {
 
 .form-message.success {
   color: #68d29a;
+}
+
+@media (max-width: 1100px) {
+  .pages-rankings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {

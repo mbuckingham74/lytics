@@ -5,7 +5,7 @@ import { SiteSelector, type SiteSelectorOption } from "./site-selector";
 
 const navigationItems = [
   { label: "Overview", href: "/" },
-  { label: "Pages" },
+  { label: "Pages", href: "/pages" },
   { label: "Referrers" },
   { label: "Geography" },
   { label: "Technology" },
@@ -14,12 +14,13 @@ const navigationItems = [
 ] as const;
 
 type DashboardShellProps = {
-  activeSection: "Overview" | "Settings";
+  activeSection: "Overview" | "Pages" | "Settings";
   children: ReactNode;
   siteCaption?: string;
   siteName?: string;
   siteOptions?: SiteSelectorOption[];
   selectedSiteId?: number;
+  siteSelectorPathname?: string;
 };
 
 export function DashboardShell({
@@ -29,6 +30,7 @@ export function DashboardShell({
   siteName = "example.com",
   siteOptions,
   selectedSiteId,
+  siteSelectorPathname = "/",
 }: DashboardShellProps) {
   return (
     <div className="dashboard-shell">
@@ -36,7 +38,11 @@ export function DashboardShell({
         <div className="wordmark">Lytics</div>
 
         {siteOptions && selectedSiteId ? (
-          <SiteSelector options={siteOptions} selectedSiteId={selectedSiteId} />
+          <SiteSelector
+            options={siteOptions}
+            selectedSiteId={selectedSiteId}
+            pathname={siteSelectorPathname}
+          />
         ) : (
           <button className="site-selector" type="button" aria-label="Select website" disabled>
             <span className="site-mark" aria-hidden="true">{siteName.charAt(0)}</span>

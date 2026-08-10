@@ -15,12 +15,14 @@ type ReportingRangeSelectorProps = {
   selectedPreset: OverviewRangePreset;
   selectedSiteId: number;
   firstSiteId: number;
+  pathname?: string;
 };
 
 export function ReportingRangeSelector({
   selectedPreset,
   selectedSiteId,
   firstSiteId,
+  pathname = "/",
 }: ReportingRangeSelectorProps) {
   const router = useRouter();
   const [selectedValue, setSelectedValue] = useState(selectedPreset);
@@ -42,6 +44,7 @@ export function ReportingRangeSelector({
           siteId: selectedSiteId,
           firstSiteId,
           rangePreset: value,
+          pathname,
         }),
         { scroll: false },
       );
