@@ -1,0 +1,21 @@
+services:
+  lytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      LYTICS_DATABASE_PATH: /data/lytics.sqlite
+      LYTICS_TIME_ZONE: ${LYTICS_TIME_ZONE:?Set LYTICS_TIME_ZONE to an IANA time zone}
+      LYTICS_GEOLITE2_CITY_PATH: /geoip/GeoLite2-City.mmdb
+    volumes:
+      - lytics-data:/data
+      - type: bind
+        source: ${LYTICS_GEOLITE2_CITY_HOST_PATH:?Set LYTICS_GEOLITE2_CITY_HOST_PATH to an absolute host file path}
+        target: /geoip/GeoLite2-City.mmdb
+        read_only: true
+
+volumes:
+  lytics-data:
