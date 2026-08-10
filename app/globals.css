@@ -548,6 +548,14 @@ h1 {
   align-items: start;
 }
 
+.referrers-section {
+  padding-top: 24px;
+}
+
+.referrers-ranking {
+  max-width: 900px;
+}
+
 .ranking-panel {
   min-width: 0;
   padding: 17px 16px 12px;

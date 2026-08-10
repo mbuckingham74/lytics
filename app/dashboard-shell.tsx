@@ -6,7 +6,7 @@ import { SiteSelector, type SiteSelectorOption } from "./site-selector";
 const navigationItems = [
   { label: "Overview", href: "/" },
   { label: "Pages", href: "/pages" },
-  { label: "Referrers" },
+  { label: "Referrers", href: "/referrers" },
   { label: "Geography" },
   { label: "Technology" },
   { label: "Realtime" },
@@ -14,7 +14,7 @@ const navigationItems = [
 ] as const;
 
 type DashboardShellProps = {
-  activeSection: "Overview" | "Pages" | "Settings";
+  activeSection: "Overview" | "Pages" | "Referrers" | "Settings";
   children: ReactNode;
   siteCaption?: string;
   siteName?: string;
