@@ -14,6 +14,7 @@ import {
 import { getRuntimeDatabase } from "../lib/server/runtime-database";
 import { listSites } from "../lib/server/sites";
 import { DashboardShell } from "./dashboard-shell";
+import { RealtimeVisitorCount } from "./realtime-visitor-count";
 import { ReportingRangeSelector } from "./reporting-range-selector";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +153,12 @@ export default async function Home({ searchParams }: HomeProps) {
     rangePreset,
     pathname: "/api/overview.csv",
   });
+  const realtimeEndpoint = createOverviewHref({
+    siteId: site.id,
+    firstSiteId: sites[0].id,
+    rangePreset: "7d",
+    pathname: "/api/realtime",
+  });
   const overviewMetrics = [
     { label: "Unique visitors", value: formatCount(report.uniqueVisitors) },
     { label: "Sessions", value: formatCount(report.sessions) },
@@ -237,10 +244,10 @@ export default async function Home({ searchParams }: HomeProps) {
           </div>
 
           <div className="header-actions" aria-label="Overview controls">
-            <span className="realtime-status">
-              <span className="live-dot" aria-hidden="true" />
-              {formatCount(report.realtimeVisitors)} live now
-            </span>
+            <RealtimeVisitorCount
+              endpoint={realtimeEndpoint}
+              initialVisitors={report.realtimeVisitors}
+            />
             <a
               className="csv-export-link"
               href={csvHref}
