@@ -45,6 +45,67 @@ docker compose build
 docker compose up -d
 ```
 
+## Deploy from a local checkout
+
+Production updates are deployed from a clean, fully pushed local checkout with
+`deploy.sh`. Every SSH and rsync operation uses the fixed Tailscale target
+`michael@100.120.233.4`; the script has no configurable or fallback SSH route.
+Set the sole deployment variable locally:
+
+- `LYTICS_DEPLOY_PATH`: the stable, existing absolute directory containing the
+  production Compose deployment, for example `/opt/lytics`.
+
+The remote directory must already exist and be writable by the SSH user. It
+must contain its server-owned, readable `.env`, an existing `compose.yaml`, and
+the GeoLite2 host file referenced by that `.env`. Docker Engine and the Docker
+Compose plugin must be available to the SSH user. The script never transfers
+or replaces `.env`. Routine deployment also requires the existing `lytics`
+service container to be running with its Compose-managed `lytics-data` named
+volume mounted at `/data`, and that volume must already contain a regular,
+readable, writable `/data/lytics.sqlite`; this is not an initial-deploy tool.
+
+The script owns one dedicated build context at
+`$LYTICS_DEPLOY_PATH/.lytics-deploy-source`. It creates that directory with a
+recognizable ownership marker when absent and refuses to use an existing
+unmarked, symlinked, or ambiguous path. Rsync deletion is scoped only to this
+validated, marker-owned stage, and the marker is protected. This makes removed
+or renamed local source disappear from the next build context without making
+the production root a deletion target.
+
+The converged stage contains exactly `.dockerignore`, `Dockerfile`,
+`package.json`, `package-lock.json`, `next.config.ts`, `next-env.d.ts`,
+`tsconfig.json`, and the contents of `app/`, `lib/`, and `public/`. It excludes
+every `.env` file, SQLite/database files and sidecars, `.mmdb` files, Git/Codex
+and editor metadata, dependencies, build/test output, logs, and documentation.
+The production-root `compose.yaml` is updated separately as one explicit file
+without deletion. Server-owned `.env`, SQLite and named-volume data, GeoLite2,
+and every other production-root runtime file are never rsync deletion targets.
+
+Run the deployment from the repository checkout:
+
+```sh
+LYTICS_DEPLOY_PATH=/opt/lytics \
+./deploy.sh
+```
+
+Deployment is local rsync followed by remote Docker Compose; it never runs
+`git pull` or any other server-side Git command. The existing service stays up
+while its replacement image builds. After the build, only the `lytics` service
+is updated, without removing its persistent volume. The script records the
+exact existing named-volume identity before transfer, revalidates it before
+the build, and requires the updated container to mount that same volume before
+health verification can succeed. An ephemeral Compose override builds only
+from the converged staged context, while routine Compose execution remains in
+the stable production-root project directory.
+
+Success prints `docker compose ps lytics` and an explicit `SUCCESS` message,
+but only after bounded checks confirm the container is running, `GET /`
+succeeds, the configured time zone is valid, SQLite is accessible at
+`/data/lytics.sqlite`, and the read-only GeoLite2 mount is readable. A startup
+or health-check failure exits nonzero with a phase-specific error and the last
+150 lines of `lytics` logs. Earlier validation or transfer failures also exit
+nonzero with a clear phase, before the service is changed.
+
 Follow logs or stop the deployment without deleting analytics data:
 
 ```sh
