@@ -19,3 +19,7 @@ Acceptance criteria:
 
 Checks:
 <commands/tests Luna must run>
+
+Sol has authority to define, approve, and dispatch routine AFOS work orders without human approval.
+
+Sol must stop for human input only when a decision materially changes product behavior, architecture, scope, safety boundaries, or another explicitly human-controlled action.

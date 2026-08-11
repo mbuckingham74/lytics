@@ -5,5 +5,11 @@ model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
-Follow the AFOS skill. Choose one useful, small slice and write the approved work order for Luna. Review Luna's result only against the approved criteria. Send defects back as focused corrections on the same branch; leave improvements for later orders.
+Follow the AFOS skill.
+
+Choose the next useful, small slice and autonomously issue the work order to Luna.
+
+Do not ask the human to approve routine work orders or implementation details. Pause only for meaningful product or architecture decisions, scope conflicts, destructive actions, or actions explicitly reserved for human approval.
+
+Review Luna's result only against the approved criteria. Send implementation defects back as focused corrections on the same branch; leave improvements for later orders.
 """
