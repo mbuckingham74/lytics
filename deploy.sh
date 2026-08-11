@@ -24,27 +24,11 @@ require_local_tool() {
 
 PHASE="local configuration"
 
-[[ -n "${LYTICS_DEPLOY_PATH:-}" ]] || \
-  fail 'LYTICS_DEPLOY_PATH is required and must be an absolute remote path.'
-
+readonly DEPLOY_PATH='/home/michael/docker-configs/lytics'
 readonly DEPLOY_HOST='michael@100.120.233.4'
 readonly STAGE_DIRECTORY_NAME='.lytics-deploy-source'
 readonly STAGE_MARKER_NAME='.lytics-deploy-source-owned-by-deploy-sh'
 readonly STAGE_MARKER_CONTENT='lytics-deploy-source:v1'
-
-if [[ "$LYTICS_DEPLOY_PATH" != /* || "$LYTICS_DEPLOY_PATH" == "/" ]]; then
-  fail 'LYTICS_DEPLOY_PATH must be an absolute path other than /.'
-fi
-
-if [[ ! "$LYTICS_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == */ ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == *//* ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == */../* ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == */.. ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == */./* ]] ||
-  [[ "$LYTICS_DEPLOY_PATH" == */. ]]; then
-  fail 'LYTICS_DEPLOY_PATH contains an unsafe or ambiguous path component.'
-fi
 
 for tool in git ssh rsync; do
   require_local_tool "$tool"
@@ -82,7 +66,7 @@ ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST" true || \
 PHASE="remote preflight"
 
 EXISTING_DATA_VOLUME="$(ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST" bash -s -- \
-  "$LYTICS_DEPLOY_PATH" "$STAGE_DIRECTORY_NAME" "$STAGE_MARKER_NAME" \
+  "$DEPLOY_PATH" "$STAGE_DIRECTORY_NAME" "$STAGE_MARKER_NAME" \
   "$STAGE_MARKER_CONTENT" <<'REMOTE_PREFLIGHT'
 set -Eeuo pipefail
 
@@ -291,16 +275,16 @@ STAGE_FILTERS=(
 
 # The only deletion boundary is the preflight-validated, marker-owned stage.
 rsync "${RSYNC_OPTIONS[@]}" --delete "${STAGE_FILTERS[@]}" \
-  ./ "$DEPLOY_HOST:$LYTICS_DEPLOY_PATH/$STAGE_DIRECTORY_NAME/"
+  ./ "$DEPLOY_HOST:$DEPLOY_PATH/$STAGE_DIRECTORY_NAME/"
 
 # Compose remains in the stable production project directory and is never a
 # deletion target.
-rsync "${RSYNC_OPTIONS[@]}" compose.yaml "$DEPLOY_HOST:$LYTICS_DEPLOY_PATH/"
+rsync "${RSYNC_OPTIONS[@]}" compose.yaml "$DEPLOY_HOST:$DEPLOY_PATH/"
 
 PHASE="remote build and update"
 
 ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST" bash -s -- \
-  "$LYTICS_DEPLOY_PATH" "$EXISTING_DATA_VOLUME" "$STAGE_DIRECTORY_NAME" \
+  "$DEPLOY_PATH" "$EXISTING_DATA_VOLUME" "$STAGE_DIRECTORY_NAME" \
   "$STAGE_MARKER_NAME" "$STAGE_MARKER_CONTENT" <<'REMOTE_DEPLOY'
 set -Eeuo pipefail
 

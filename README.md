@@ -50,27 +50,23 @@ docker compose up -d
 Production updates are deployed from a clean, fully pushed local checkout with
 `deploy.sh`. Every SSH and rsync operation uses the fixed Tailscale target
 `michael@100.120.233.4`; the script has no configurable or fallback SSH route.
-Set the sole deployment variable locally:
-
-- `LYTICS_DEPLOY_PATH`: the stable, existing absolute directory containing the
-  production Compose deployment, for example `/opt/lytics`.
-
-The remote directory must already exist and be writable by the SSH user. It
-must contain its server-owned, readable `.env`, an existing `compose.yaml`, and
-the GeoLite2 host file referenced by that `.env`. Docker Engine and the Docker
-Compose plugin must be available to the SSH user. The script never transfers
-or replaces `.env`. Routine deployment also requires the existing `lytics`
-service container to be running with its Compose-managed `lytics-data` named
-volume mounted at `/data`, and that volume must already contain a regular,
-readable, writable `/data/lytics.sqlite`; this is not an initial-deploy tool.
+The fixed production directory is `/home/michael/docker-configs/lytics`. It
+must already exist and be writable by the SSH user, contain its server-owned,
+readable `.env` and an existing `compose.yaml`, and provide the GeoLite2 host
+file referenced by that `.env`. Docker Engine and the Docker Compose plugin
+must be available to the SSH user. The script never transfers or replaces
+`.env`. Routine deployment also requires the existing `lytics` service
+container to be running with its Compose-managed `lytics-data` named volume
+mounted at `/data`, and that volume must already contain a regular, readable,
+writable `/data/lytics.sqlite`; this is not an initial-deploy tool.
 
 The script owns one dedicated build context at
-`$LYTICS_DEPLOY_PATH/.lytics-deploy-source`. It creates that directory with a
-recognizable ownership marker when absent and refuses to use an existing
-unmarked, symlinked, or ambiguous path. Rsync deletion is scoped only to this
-validated, marker-owned stage, and the marker is protected. This makes removed
-or renamed local source disappear from the next build context without making
-the production root a deletion target.
+`/home/michael/docker-configs/lytics/.lytics-deploy-source`. It creates that
+directory with a recognizable ownership marker when absent and refuses to use
+an existing unmarked, symlinked, or ambiguous path. Rsync deletion is scoped
+only to this validated, marker-owned stage, and the marker is protected. This
+makes removed or renamed local source disappear from the next build context
+without making the production root a deletion target.
 
 The converged stage contains exactly `.dockerignore`, `Dockerfile`,
 `package.json`, `package-lock.json`, `next.config.ts`, `next-env.d.ts`,
@@ -84,7 +80,6 @@ and every other production-root runtime file are never rsync deletion targets.
 Run the deployment from the repository checkout:
 
 ```sh
-LYTICS_DEPLOY_PATH=/opt/lytics \
 ./deploy.sh
 ```
 
