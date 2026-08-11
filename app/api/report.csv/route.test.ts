@@ -384,6 +384,117 @@ test("isolates the selected site and range and preserves UI query fallbacks", as
   });
 });
 
+test("exports every report view for one inclusive custom range and site", async () => {
+  await withRouteDatabase(async (database) => {
+    const firstSite = registerSite(database, {
+      name: "First",
+      domain: "first.example",
+    });
+    const secondSite = registerSite(database, {
+      name: "Second",
+      domain: "second.example",
+    });
+    const startDate = "2026-08-08";
+    const endDate = "2026-08-10";
+
+    for (const [siteId, marker, occurredAt] of [
+      [secondSite.id, "included-start", "2026-08-08T00:00:00.000Z"],
+      [secondSite.id, "included-end", "2026-08-10T23:59:59.999Z"],
+      [secondSite.id, "excluded-next-day", "2026-08-11T00:00:00.000Z"],
+      [firstSite.id, "other-site", "2026-08-09T12:00:00.000Z"],
+    ] as const) {
+      recordFixturePageview(database, {
+        siteId,
+        visitorId: marker,
+        occurredAt: new Date(occurredAt),
+        path: `/${marker}`,
+        referrer: `https://${marker}.example`,
+        geography: {
+          countryCode: marker,
+          countryName: marker,
+          regionCode: marker,
+          regionName: marker,
+          cityName: marker,
+        },
+        technology: {
+          browserName: marker,
+          deviceType: marker,
+          operatingSystemName: marker,
+        },
+      });
+    }
+
+    for (const view of [
+      "pages",
+      "referrers",
+      "geography",
+      "technology",
+    ]) {
+      const report = await readCsv(
+        GET(request(
+          `?view=${view}&site=2&range=custom&start=${startDate}&end=${endDate}`,
+        )),
+        { view, siteId: secondSite.id, startDate, endDate },
+      );
+      const body = report.rows.flat().join("\n");
+
+      assert.equal(body.includes("included-start"), true);
+      assert.equal(body.includes("included-end"), true);
+      assert.equal(body.includes("excluded-next-day"), false);
+      assert.equal(body.includes("other-site"), false);
+    }
+
+    const defaultSite = await readCsv(
+      GET(request(
+        `?view=pages&range=custom&start=${startDate}&end=${endDate}`,
+      )),
+      { view: "pages", siteId: firstSite.id, startDate, endDate },
+    );
+    const defaultBody = defaultSite.rows.flat().join("\n");
+    assert.equal(defaultBody.includes("other-site"), true);
+    assert.equal(defaultBody.includes("included-start"), false);
+  });
+});
+
+test("invalid custom inputs fall back exactly and presets ignore stray dates", async () => {
+  await withRouteDatabase(async (database) => {
+    registerSite(database, { name: "First", domain: "first.example" });
+    registerSite(database, { name: "Second", domain: "second.example" });
+
+    const baseline = GET(request("?view=pages"));
+    const baselineDisposition = baseline.headers.get("content-disposition");
+    const baselineBody = await baseline.text();
+
+    for (const query of [
+      "?view=pages&range=custom",
+      "?view=pages&range=custom&start=2026-08-01",
+      "?view=pages&range=custom&start=bad&end=2026-08-10",
+      "?view=pages&range=custom&start=2026-02-29&end=2026-03-01",
+      "?view=pages&range=custom&start=2026-08-10&end=2026-08-09",
+      "?view=pages&range=custom&range=custom&start=2026-08-01&end=2026-08-10",
+      "?view=pages&range=custom&start=2026-08-01&start=2026-08-02&end=2026-08-10",
+      "?view=pages&range=custom&start=2026-08-01&end=2026-08-10&end=2026-08-11",
+    ]) {
+      const response = GET(request(query));
+      assert.equal(response.headers.get("content-disposition"), baselineDisposition);
+      assert.equal(await response.text(), baselineBody);
+    }
+
+    const todayBaseline = GET(request("?view=pages&range=today"));
+    const todayDisposition = todayBaseline.headers.get("content-disposition");
+    const todayBody = await todayBaseline.text();
+    const todayWithStrayDates = GET(request(
+      "?view=pages&range=today&start=bad&start=2026-08-01&end=2026-02-29",
+    ));
+
+    assert.equal(
+      todayWithStrayDates.headers.get("content-disposition"),
+      todayDisposition,
+    );
+    assert.equal(await todayWithStrayDates.text(), todayBody);
+  });
+});
+
 test("returns safe no-store 400 responses for absent, invalid, and repeated views", async () => {
   for (const query of [
     "",

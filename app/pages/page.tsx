@@ -3,12 +3,12 @@ import Link from "next/link";
 import {
   createReportCsvHref,
   overviewRangePresets,
-  resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
   resolveOverviewSite,
 } from "../../lib/overview-query";
 import { getPagesReport } from "../../lib/server/pages-report";
 import {
-  createRecentCalendarSelection,
+  createOverviewReportingRange,
   getReportingTimeZone,
 } from "../../lib/server/reporting-range";
 import { getRuntimeDatabase } from "../../lib/server/runtime-database";
@@ -25,6 +25,14 @@ type PagesProps = {
 
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
+}
+
+function toUtcCalendarInstant(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  instant.setUTCHours(0, 0, 0, 0);
+  return instant;
 }
 
 function EmptyPages() {
@@ -66,8 +74,14 @@ export default async function Pages({ searchParams }: PagesProps) {
 
   const query = await searchParams;
   const site = resolveOverviewSite(sites, query.site);
-  const rangePreset = resolveOverviewRangePreset(query.range);
-  const range = overviewRangePresets[rangePreset];
+  const rangeSelection = resolveOverviewRangeSelection(
+    query.range,
+    query.start,
+    query.end,
+  );
+  const rangeMetadata = rangeSelection.type === "preset"
+    ? overviewRangePresets[rangeSelection.preset]
+    : null;
 
   if (!site) {
     return <EmptyPages />;
@@ -75,22 +89,32 @@ export default async function Pages({ searchParams }: PagesProps) {
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
-  const selection = createRecentCalendarSelection({
+  const selection = createOverviewReportingRange({
+    selection: rangeSelection,
     nowAt,
     timeZone,
-    dayCount: range.dayCount,
   });
   const report = getPagesReport(database, {
     siteId: site.id,
-    ...selection,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
     timeZone,
   });
   const csvHref = createReportCsvHref({
     view: "pages",
     siteId: site.id,
     firstSiteId: sites[0].id,
-    rangePreset,
+    rangeSelection,
   });
+  const periodFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const periodCopy = rangeMetadata
+    ? rangeMetadata.periodCopy
+    : `${periodFormatter.format(toUtcCalendarInstant(selection.startDate))}–${periodFormatter.format(toUtcCalendarInstant(selection.endDate))}`;
   const rankings = [
     {
       title: "Pages",
@@ -118,6 +142,7 @@ export default async function Pages({ searchParams }: PagesProps) {
       siteOptions={sites}
       selectedSiteId={site.id}
       siteSelectorPathname="/pages"
+      siteSelectorPreserveCustomRange
     >
       <main className="main-content">
         <header className="content-header">
@@ -136,7 +161,10 @@ export default async function Pages({ searchParams }: PagesProps) {
               CSV
             </a>
             <ReportingRangeSelector
-              selectedPreset={rangePreset}
+              customEnabled
+              selectedRange={rangeSelection}
+              resolvedStartDate={selection.startDate}
+              resolvedEndDate={selection.endDate}
               selectedSiteId={site.id}
               firstSiteId={sites[0].id}
               pathname="/pages"
@@ -148,7 +176,7 @@ export default async function Pages({ searchParams }: PagesProps) {
           <div className="section-heading">
             <div>
               <h2 id="pages-report-heading">Page performance</h2>
-              <p>Session-ranked paths for {range.periodCopy}</p>
+              <p>Session-ranked paths for {periodCopy}</p>
             </div>
             <span className="updated-label">{report.timeZone}</span>
           </div>

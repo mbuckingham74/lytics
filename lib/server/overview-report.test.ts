@@ -120,6 +120,18 @@ test("composes the complete Overview report from the approved primitives", () =>
     assert.equal(report.pagesPerSession, 1.5);
     assert.equal(report.bounceRate, 50);
     assert.equal(report.averageSessionDurationSeconds, 210);
+    assert.deepEqual(report.previousPeriod, {
+      startDate: "2026-08-07",
+      endDate: "2026-08-08",
+      startAt: new Date("2026-08-07T00:00:00.000Z"),
+      endAt: new Date("2026-08-09T00:00:00.000Z"),
+      pageviews: 0,
+      uniqueVisitors: 0,
+      sessions: 0,
+      pagesPerSession: 0,
+      bounceRate: 0,
+      averageSessionDurationSeconds: 0,
+    });
     assert.equal(report.realtimeVisitors, 2);
     assert.deepEqual(report.dailyUniqueVisitorTrend, [
       { date: "2026-08-09", uniqueVisitors: 1 },
@@ -134,6 +146,99 @@ test("composes the complete Overview report from the approved primitives", () =>
       { referrer: "search", sessions: 2 },
       { referrer: null, sessions: 1 },
       { referrer: "newsletter", sessions: 1 },
+    ]);
+  });
+});
+
+test("composes isolated previous-period KPIs beside unchanged current data", () => {
+  withDatabase(({ database, siteId, otherSiteId }) => {
+    addPageview(database, {
+      siteId,
+      visitorId: "previous-a",
+      path: "/previous-entry",
+      referrer: "previous-source",
+      occurredAt: "2026-08-08T08:00:00.000Z",
+    });
+    addPageview(database, {
+      siteId,
+      visitorId: "previous-a",
+      path: "/previous-exit",
+      occurredAt: "2026-08-08T08:10:00.000Z",
+    });
+    addPageview(database, {
+      siteId,
+      visitorId: "previous-b",
+      path: "/previous-entry",
+      occurredAt: "2026-08-08T09:00:00.000Z",
+    });
+    addPageview(database, {
+      siteId,
+      visitorId: "current-a",
+      path: "/current-entry",
+      referrer: "current-source",
+      occurredAt: "2026-08-09T00:00:00.000Z",
+    });
+    addPageview(database, {
+      siteId,
+      visitorId: "current-a",
+      path: "/current-exit",
+      occurredAt: "2026-08-09T00:05:00.000Z",
+    });
+    addPageview(database, {
+      siteId: otherSiteId,
+      visitorId: "other-previous",
+      path: "/other-previous",
+      referrer: "other-source",
+      occurredAt: "2026-08-08T08:05:00.000Z",
+    });
+    addPageview(database, {
+      siteId: otherSiteId,
+      visitorId: "other-current",
+      path: "/other-current",
+      occurredAt: "2026-08-09T00:04:00.000Z",
+    });
+
+    const report = getOverviewReport(database, {
+      siteId,
+      startDate: "2026-08-09",
+      endDate: "2026-08-09",
+      timeZone: "UTC",
+      nowAt: new Date("2026-08-09T00:05:00.000Z"),
+    });
+
+    assert.equal(report.startDate, "2026-08-09");
+    assert.equal(report.endDate, "2026-08-09");
+    assert.deepEqual(report.startAt, new Date("2026-08-09T00:00:00.000Z"));
+    assert.deepEqual(report.endAt, new Date("2026-08-10T00:00:00.000Z"));
+    assert.equal(report.pageviews, 2);
+    assert.equal(report.uniqueVisitors, 1);
+    assert.equal(report.sessions, 1);
+    assert.equal(report.pagesPerSession, 2);
+    assert.equal(report.bounceRate, 0);
+    assert.equal(report.averageSessionDurationSeconds, 300);
+    assert.deepEqual(report.previousPeriod, {
+      startDate: "2026-08-08",
+      endDate: "2026-08-08",
+      startAt: new Date("2026-08-08T00:00:00.000Z"),
+      endAt: new Date("2026-08-09T00:00:00.000Z"),
+      pageviews: 3,
+      uniqueVisitors: 2,
+      sessions: 2,
+      pagesPerSession: 1.5,
+      bounceRate: 50,
+      averageSessionDurationSeconds: 300,
+    });
+    assert.equal(report.previousPeriod.endAt.getTime(), report.startAt.getTime());
+    assert.equal(report.realtimeVisitors, 1);
+    assert.deepEqual(report.dailyUniqueVisitorTrend, [
+      { date: "2026-08-09", uniqueVisitors: 1 },
+    ]);
+    assert.deepEqual(report.sessionRankedPages, [
+      { path: "/current-entry", sessions: 1 },
+      { path: "/current-exit", sessions: 1 },
+    ]);
+    assert.deepEqual(report.sessionRankedReferrers, [
+      { referrer: "current-source", sessions: 1 },
     ]);
   });
 });

@@ -1,9 +1,19 @@
 export type OverviewRangePreset = "today" | "7d" | "30d" | "90d";
+export type OverviewRangeSelection =
+  | { type: "preset"; preset: OverviewRangePreset }
+  | { type: "custom"; startDate: string; endDate: string };
 export type ReportCsvView =
   | "pages"
   | "referrers"
   | "geography"
   | "technology";
+
+export const overviewDrillDownRoutes = {
+  pages: "/pages",
+  referrers: "/referrers",
+  geography: "/geography",
+  technology: "/technology",
+} as const satisfies Readonly<Record<ReportCsvView, string>>;
 
 export type OverviewSiteRecord = {
   id: number;
@@ -12,6 +22,18 @@ export type OverviewSiteRecord = {
 };
 
 export type OverviewQueryValue = string | string[] | undefined;
+
+type LegacyRangeInput = {
+  rangePreset: OverviewRangePreset;
+  rangeSelection?: never;
+};
+
+type CanonicalRangeInput = {
+  rangePreset?: never;
+  rangeSelection: OverviewRangeSelection;
+};
+
+type RangeHrefInput = LegacyRangeInput | CanonicalRangeInput;
 
 export const overviewRangePresets = {
   today: {
@@ -67,6 +89,73 @@ export function resolveOverviewRangePreset(
   return candidate as OverviewRangePreset;
 }
 
+function readSingleQueryValue(value: OverviewQueryValue): string | undefined {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? value[0] : undefined;
+  }
+
+  return value;
+}
+
+function isCanonicalCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+
+  if (!match) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDayCounts = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return (
+    year > 0 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= monthDayCounts[month - 1]
+  );
+}
+
+export function resolveOverviewRangeSelection(
+  range: OverviewQueryValue,
+  start: OverviewQueryValue,
+  end: OverviewQueryValue,
+): OverviewRangeSelection {
+  const rangeValue = readSingleQueryValue(range);
+
+  if (
+    typeof rangeValue === "string" &&
+    Object.hasOwn(overviewRangePresets, rangeValue)
+  ) {
+    return {
+      type: "preset",
+      preset: rangeValue as OverviewRangePreset,
+    };
+  }
+
+  if (rangeValue !== "custom") {
+    return { type: "preset", preset: "7d" };
+  }
+
+  const startDate = readSingleQueryValue(start);
+  const endDate = readSingleQueryValue(end);
+
+  if (
+    typeof startDate !== "string" ||
+    typeof endDate !== "string" ||
+    !isCanonicalCalendarDate(startDate) ||
+    !isCanonicalCalendarDate(endDate) ||
+    startDate > endDate
+  ) {
+    return { type: "preset", preset: "7d" };
+  }
+
+  return { type: "custom", startDate, endDate };
+}
+
 export function resolveOverviewSite<T extends OverviewSiteRecord>(
   sites: readonly T[],
   value: OverviewQueryValue,
@@ -89,9 +178,8 @@ export function resolveOverviewSite<T extends OverviewSiteRecord>(
 export function createOverviewHref(input: {
   siteId: number;
   firstSiteId: number;
-  rangePreset: OverviewRangePreset;
   pathname?: string;
-}): string {
+} & RangeHrefInput): string {
   const pathname = input.pathname ?? "/";
   const parameters = new URLSearchParams();
 
@@ -99,20 +187,39 @@ export function createOverviewHref(input: {
     parameters.set("site", String(input.siteId));
   }
 
-  if (input.rangePreset !== "7d") {
-    parameters.set("range", input.rangePreset);
+  const rangeSelection = input.rangeSelection ?? {
+    type: "preset",
+    preset: input.rangePreset,
+  };
+
+  if (rangeSelection.type === "custom") {
+    parameters.set("range", "custom");
+    parameters.set("start", rangeSelection.startDate);
+    parameters.set("end", rangeSelection.endDate);
+  } else if (rangeSelection.preset !== "7d") {
+    parameters.set("range", rangeSelection.preset);
   }
 
   const query = parameters.toString();
   return query ? `${pathname}?${query}` : pathname;
 }
 
+export function createOverviewDrillDownHref(input: {
+  view: keyof typeof overviewDrillDownRoutes;
+  siteId: number;
+  firstSiteId: number;
+} & RangeHrefInput): string {
+  return createOverviewHref({
+    ...input,
+    pathname: overviewDrillDownRoutes[input.view],
+  });
+}
+
 export function createReportCsvHref(input: {
   view: ReportCsvView;
   siteId: number;
   firstSiteId: number;
-  rangePreset: OverviewRangePreset;
-}): string {
+} & RangeHrefInput): string {
   const parameters = new URLSearchParams();
   parameters.set("view", input.view);
 
@@ -120,8 +227,17 @@ export function createReportCsvHref(input: {
     parameters.set("site", String(input.siteId));
   }
 
-  if (input.rangePreset !== "7d") {
-    parameters.set("range", input.rangePreset);
+  const rangeSelection = input.rangeSelection ?? {
+    type: "preset",
+    preset: input.rangePreset,
+  };
+
+  if (rangeSelection.type === "custom") {
+    parameters.set("range", "custom");
+    parameters.set("start", rangeSelection.startDate);
+    parameters.set("end", rangeSelection.endDate);
+  } else if (rangeSelection.preset !== "7d") {
+    parameters.set("range", rangeSelection.preset);
   }
 
   return `/api/report.csv?${parameters.toString()}`;

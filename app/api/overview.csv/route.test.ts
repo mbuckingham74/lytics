@@ -245,6 +245,131 @@ test("invalid and repeated values use the first-site seven-day fallback", async 
   });
 });
 
+test("exports inclusive custom dates with zero filling and site isolation", async () => {
+  await withRouteDatabase(async (database) => {
+    const firstSite = registerSite(database, {
+      name: "First",
+      domain: "first.example",
+    });
+    const secondSite = registerSite(database, {
+      name: "Second",
+      domain: "second.example",
+    });
+    const dates = ["2026-08-08", "2026-08-09", "2026-08-10"];
+
+    for (const [siteId, visitorId, occurredAt] of [
+      [firstSite.id, "first-start", "2026-08-08T00:00:00.000Z"],
+      [firstSite.id, "first-end", "2026-08-10T23:59:59.999Z"],
+      [firstSite.id, "first-excluded", "2026-08-11T00:00:00.000Z"],
+      [secondSite.id, "second-start", "2026-08-08T00:00:00.000Z"],
+      [secondSite.id, "second-start-two", "2026-08-08T12:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId,
+        visitorId,
+        path: "/custom",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    const customQuery = "range=custom&start=2026-08-08&end=2026-08-10";
+    const firstLines = await assertCsvResponse(
+      GET(request(`?${customQuery}`)),
+      { siteId: firstSite.id, dates },
+    );
+    const secondLines = await assertCsvResponse(
+      GET(request(`?site=2&${customQuery}`)),
+      { siteId: secondSite.id, dates },
+    );
+
+    assert.deepEqual(firstLines.slice(1), [
+      "2026-08-08,1",
+      "2026-08-09,0",
+      "2026-08-10,1",
+    ]);
+    assert.deepEqual(secondLines.slice(1), [
+      "2026-08-08,2",
+      "2026-08-09,0",
+      "2026-08-10,0",
+    ]);
+  });
+});
+
+test("uses Los Angeles custom calendar boundaries across spring-forward", async () => {
+  await withRouteDatabase(async (database) => {
+    process.env.LYTICS_TIME_ZONE = "America/Los_Angeles";
+    const site = registerSite(database, {
+      name: "DST",
+      domain: "dst.example",
+    });
+    const dates = ["2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"];
+
+    for (const [visitorId, occurredAt] of [
+      ["included-start", "2026-03-07T08:00:00.000Z"],
+      ["included-end", "2026-03-11T06:59:59.999Z"],
+      ["excluded-next-day", "2026-03-11T07:00:00.000Z"],
+    ] as const) {
+      recordPageview(database, {
+        siteId: site.id,
+        visitorId,
+        path: "/dst",
+        occurredAt: new Date(occurredAt),
+      });
+    }
+
+    const lines = await assertCsvResponse(
+      GET(request("?range=custom&start=2026-03-07&end=2026-03-10")),
+      { siteId: site.id, dates },
+    );
+
+    assert.deepEqual(lines.slice(1), [
+      "2026-03-07,1",
+      "2026-03-08,0",
+      "2026-03-09,0",
+      "2026-03-10,1",
+    ]);
+  });
+});
+
+test("invalid custom inputs fall back exactly and presets ignore stray dates", async () => {
+  await withRouteDatabase(async (database) => {
+    registerSite(database, { name: "First", domain: "first.example" });
+    registerSite(database, { name: "Second", domain: "second.example" });
+
+    const baseline = GET(request());
+    const baselineDisposition = baseline.headers.get("content-disposition");
+    const baselineBody = await baseline.text();
+
+    for (const query of [
+      "?range=custom",
+      "?range=custom&start=2026-08-01",
+      "?range=custom&start=bad&end=2026-08-10",
+      "?range=custom&start=2026-02-29&end=2026-03-01",
+      "?range=custom&start=2026-08-10&end=2026-08-09",
+      "?range=custom&range=custom&start=2026-08-01&end=2026-08-10",
+      "?range=custom&start=2026-08-01&start=2026-08-02&end=2026-08-10",
+      "?range=custom&start=2026-08-01&end=2026-08-10&end=2026-08-11",
+    ]) {
+      const response = GET(request(query));
+      assert.equal(response.headers.get("content-disposition"), baselineDisposition);
+      assert.equal(await response.text(), baselineBody);
+    }
+
+    const todayBaseline = GET(request("?range=today"));
+    const todayDisposition = todayBaseline.headers.get("content-disposition");
+    const todayBody = await todayBaseline.text();
+    const todayWithStrayDates = GET(request(
+      "?range=today&start=bad&start=2026-08-01&end=2026-02-29",
+    ));
+
+    assert.equal(
+      todayWithStrayDates.headers.get("content-disposition"),
+      todayDisposition,
+    );
+    assert.equal(await todayWithStrayDates.text(), todayBody);
+  });
+});
+
 test("returns a safe no-store 404 when no site is registered", async () => {
   await withRouteDatabase(async () => {
     delete process.env.LYTICS_TIME_ZONE;

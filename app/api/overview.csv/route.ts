@@ -1,11 +1,10 @@
 import {
-  overviewRangePresets,
-  resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
   resolveOverviewSite,
   type OverviewQueryValue,
 } from "../../../lib/overview-query";
 import {
-  createRecentCalendarSelection,
+  createOverviewReportingRange,
   getReportingTimeZone,
 } from "../../../lib/server/reporting-range";
 import { getRuntimeDatabase } from "../../../lib/server/runtime-database";
@@ -22,7 +21,7 @@ const noStoreHeaders = {
 
 function readQueryValue(
   searchParams: URLSearchParams,
-  key: "site" | "range",
+  key: "site" | "range" | "start" | "end",
 ): OverviewQueryValue {
   const values = searchParams.getAll(key);
 
@@ -54,15 +53,17 @@ export function GET(request: Request): Response {
       return safeError("No registered site is available", 404);
     }
 
-    const rangePreset = resolveOverviewRangePreset(
+    const rangeSelection = resolveOverviewRangeSelection(
       readQueryValue(searchParams, "range"),
+      readQueryValue(searchParams, "start"),
+      readQueryValue(searchParams, "end"),
     );
     const nowAt = new Date();
     const timeZone = getReportingTimeZone();
-    const selection = createRecentCalendarSelection({
+    const selection = createOverviewReportingRange({
+      selection: rangeSelection,
       nowAt,
       timeZone,
-      dayCount: overviewRangePresets[rangePreset].dayCount,
     });
     const trend = getDailyUniqueVisitorTrend(database, {
       siteId: site.id,

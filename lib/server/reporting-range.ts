@@ -1,3 +1,8 @@
+import {
+  overviewRangePresets,
+  type OverviewRangeSelection,
+} from "../overview-query";
+
 type Environment = Readonly<Record<string, string | undefined>>;
 
 type CalendarDate = {
@@ -26,6 +31,10 @@ export type ReportingRange = {
 export type CalendarDateSelection = {
   startDate: string;
   endDate: string;
+};
+
+export type OverviewReportingRange = CalendarDateSelection & ReportingRange & {
+  dayCount: number;
 };
 
 const calendarDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -230,6 +239,16 @@ function formatCalendarDate(date: CalendarDate): string {
   ].join("-");
 }
 
+function countInclusiveCalendarDays(
+  startDate: CalendarDate,
+  endDate: CalendarDate,
+): number {
+  return Math.round(
+    (utcTimestamp(endDate) - utcTimestamp(startDate)) /
+      (24 * 60 * 60 * 1000),
+  ) + 1;
+}
+
 export function createRecentCalendarSelection(
   input: RecentCalendarSelectionInput,
 ): CalendarDateSelection {
@@ -284,4 +303,49 @@ export function createReportingRange(input: ReportingRangeInput): ReportingRange
     startAt: localMidnightToInstant(startDate, formatter),
     endAt: localMidnightToInstant(nextCalendarDate(endDate), formatter),
   };
+}
+
+export function createOverviewReportingRange(input: {
+  selection: OverviewRangeSelection;
+  nowAt: Date;
+  timeZone: string;
+}): OverviewReportingRange {
+  const selection = input.selection.type === "preset"
+    ? createRecentCalendarSelection({
+        nowAt: input.nowAt,
+        timeZone: input.timeZone,
+        dayCount: overviewRangePresets[input.selection.preset].dayCount,
+      })
+    : {
+        startDate: input.selection.startDate,
+        endDate: input.selection.endDate,
+      };
+  const range = createReportingRange({ ...selection, timeZone: input.timeZone });
+  const dayCount = input.selection.type === "preset"
+    ? overviewRangePresets[input.selection.preset].dayCount
+    : countInclusiveCalendarDays(
+        parseCalendarDate(selection.startDate, "startDate"),
+        parseCalendarDate(selection.endDate, "endDate"),
+      );
+
+  return { ...selection, ...range, dayCount };
+}
+
+export function createPreviousOverviewReportingRange(
+  input: ReportingRangeInput,
+): OverviewReportingRange {
+  createReportingRange(input);
+  const currentStartDate = parseCalendarDate(input.startDate, "startDate");
+  const currentEndDate = parseCalendarDate(input.endDate, "endDate");
+  const dayCount = countInclusiveCalendarDays(
+    currentStartDate,
+    currentEndDate,
+  );
+  const selection = {
+    startDate: formatCalendarDate(subtractCalendarDays(currentStartDate, dayCount)),
+    endDate: formatCalendarDate(subtractCalendarDays(currentStartDate, 1)),
+  };
+  const range = createReportingRange({ ...selection, timeZone: input.timeZone });
+
+  return { ...selection, ...range, dayCount };
 }

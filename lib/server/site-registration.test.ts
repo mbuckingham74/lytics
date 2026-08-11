@@ -2,8 +2,16 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { registerSiteAtBoundary } from "./site-registration";
-import { initializeSites, listSites, registerSite } from "./sites";
+import {
+  registerSiteAtBoundary,
+  updateSiteAtBoundary,
+} from "./site-registration";
+import {
+  findSiteByDomain,
+  initializeSites,
+  listSites,
+  registerSite,
+} from "./sites";
 
 function withDatabase(run: (database: DatabaseSync) => void): void {
   const database = new DatabaseSync(":memory:");
@@ -179,6 +187,154 @@ test("contains unexpected persistence failures behind a safe message", () => {
     assert.deepEqual(
       registerSiteAtBoundary(database, { name: "Site", domain: "site.example" }),
       { ok: false, message: "Could not register the site. Try again." },
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("updates an existing site with a stable ID and canonical domain", () => {
+  withDatabase((database) => {
+    const site = registerSite(database, {
+      name: "Original",
+      domain: "original.example",
+    });
+
+    const result = updateSiteAtBoundary(database, {
+      siteId: site.id,
+      name: "  Renamed Site  ",
+      domain: "  BÜCHER.Example  ",
+    });
+
+    assert.deepEqual(result, {
+      ok: true,
+      site: {
+        id: site.id,
+        name: "Renamed Site",
+        domain: "xn--bcher-kva.example",
+      },
+    });
+    assert.equal(findSiteByDomain(database, "original.example"), null);
+    assert.deepEqual(
+      findSiteByDomain(database, "XN--BCHER-KVA.EXAMPLE"),
+      result.ok ? result.site : null,
+    );
+  });
+});
+
+test("allows no-op and canonically equivalent self-domain updates", () => {
+  withDatabase((database) => {
+    const site = registerSite(database, {
+      name: "Books",
+      domain: "xn--bcher-kva.example",
+    });
+
+    assert.deepEqual(
+      updateSiteAtBoundary(database, {
+        siteId: site.id,
+        name: site.name,
+        domain: "BÜCHER.Example",
+      }),
+      { ok: true, site },
+    );
+    assert.deepEqual(listSites(database), [site]);
+  });
+});
+
+test("rejects invalid and unknown update site IDs without mutation", () => {
+  withDatabase((database) => {
+    const site = registerSite(database, {
+      name: "Existing",
+      domain: "existing.example",
+    });
+
+    for (const siteId of [null, "1", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.deepEqual(
+        updateSiteAtBoundary(database, {
+          siteId,
+          name: "Changed",
+          domain: "changed.example",
+        }),
+        { ok: false, message: "Select a valid site." },
+      );
+    }
+    assert.deepEqual(
+      updateSiteAtBoundary(database, {
+        siteId: 999,
+        name: "Missing",
+        domain: "missing.example",
+      }),
+      { ok: false, message: "That site is not registered." },
+    );
+    assert.deepEqual(listSites(database), [site]);
+  });
+});
+
+test("rejects blank names and invalid hostnames during updates", () => {
+  withDatabase((database) => {
+    const site = registerSite(database, {
+      name: "Existing",
+      domain: "existing.example",
+    });
+
+    assert.deepEqual(
+      updateSiteAtBoundary(database, {
+        siteId: site.id,
+        name: "   ",
+        domain: "changed.example",
+      }),
+      { ok: false, message: "Enter a site name." },
+    );
+    assert.deepEqual(
+      updateSiteAtBoundary(database, {
+        siteId: site.id,
+        name: "Changed",
+        domain: "https://changed.example/path",
+      }),
+      { ok: false, message: invalidHostnameMessage },
+    );
+    assert.deepEqual(listSites(database), [site]);
+  });
+});
+
+test("rejects another site's canonical domain atomically", () => {
+  withDatabase((database) => {
+    const first = registerSite(database, {
+      name: "First",
+      domain: "first.example",
+    });
+    const second = registerSite(database, {
+      name: "Books",
+      domain: "xn--bcher-kva.example",
+    });
+    const sitesBefore = listSites(database);
+
+    for (const domain of ["XN--BCHER-KVA.EXAMPLE", "BÜCHER.example"]) {
+      assert.deepEqual(
+        updateSiteAtBoundary(database, {
+          siteId: first.id,
+          name: "Should Not Persist",
+          domain,
+        }),
+        { ok: false, message: "That domain is already registered." },
+      );
+      assert.deepEqual(listSites(database), sitesBefore);
+    }
+    assert.deepEqual(findSiteByDomain(database, second.domain), second);
+  });
+});
+
+test("contains unexpected update failures behind an update-specific message", () => {
+  const database = new DatabaseSync(":memory:");
+
+  try {
+    assert.deepEqual(
+      updateSiteAtBoundary(database, {
+        siteId: 1,
+        name: "Changed",
+        domain: "changed.example",
+      }),
+      { ok: false, message: "Could not update the site. Try again." },
     );
   } finally {
     database.close();

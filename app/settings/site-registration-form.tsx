@@ -6,6 +6,7 @@ import {
   registerSiteAction,
   type SiteRegistrationActionState,
 } from "./actions";
+import { SiteTrackingSnippet } from "./site-tracking-snippet";
 
 const initialState: SiteRegistrationActionState = {
   status: "idle",
@@ -61,6 +62,11 @@ export function SiteRegistrationForm() {
       >
         {state.message}
       </p>
+
+      <SiteTrackingSnippet
+        resetCopyFeedback={isPending}
+        visible={state.status === "success"}
+      />
     </form>
   );
 }

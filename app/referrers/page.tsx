@@ -3,13 +3,12 @@ import Link from "next/link";
 import {
   createReportCsvHref,
   overviewRangePresets,
-  resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
   resolveOverviewSite,
 } from "../../lib/overview-query";
 import { getRankedReferrersBySessions } from "../../lib/server/pageviews";
 import {
-  createRecentCalendarSelection,
-  createReportingRange,
+  createOverviewReportingRange,
   getReportingTimeZone,
 } from "../../lib/server/reporting-range";
 import { getRuntimeDatabase } from "../../lib/server/runtime-database";
@@ -26,6 +25,14 @@ type ReferrersProps = {
 
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
+}
+
+function toUtcCalendarInstant(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  instant.setUTCHours(0, 0, 0, 0);
+  return instant;
 }
 
 function EmptyReferrers() {
@@ -70,8 +77,14 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
 
   const query = await searchParams;
   const site = resolveOverviewSite(sites, query.site);
-  const rangePreset = resolveOverviewRangePreset(query.range);
-  const rangePresetMetadata = overviewRangePresets[rangePreset];
+  const rangeSelection = resolveOverviewRangeSelection(
+    query.range,
+    query.start,
+    query.end,
+  );
+  const rangeMetadata = rangeSelection.type === "preset"
+    ? overviewRangePresets[rangeSelection.preset]
+    : null;
 
   if (!site) {
     return <EmptyReferrers />;
@@ -79,26 +92,31 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
-  const selection = createRecentCalendarSelection({
+  const selection = createOverviewReportingRange({
+    selection: rangeSelection,
     nowAt,
-    timeZone,
-    dayCount: rangePresetMetadata.dayCount,
-  });
-  const range = createReportingRange({
-    ...selection,
     timeZone,
   });
   const referrers = getRankedReferrersBySessions(database, {
     siteId: site.id,
-    startAt: range.startAt,
-    endAt: range.endAt,
+    startAt: selection.startAt,
+    endAt: selection.endAt,
   });
   const csvHref = createReportCsvHref({
     view: "referrers",
     siteId: site.id,
     firstSiteId: sites[0].id,
-    rangePreset,
+    rangeSelection,
   });
+  const periodFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const periodCopy = rangeMetadata
+    ? rangeMetadata.periodCopy
+    : `${periodFormatter.format(toUtcCalendarInstant(selection.startDate))}–${periodFormatter.format(toUtcCalendarInstant(selection.endDate))}`;
   const maximumSessions = Math.max(
     0,
     ...referrers.map((referrer) => referrer.sessions),
@@ -110,6 +128,7 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
       siteOptions={sites}
       selectedSiteId={site.id}
       siteSelectorPathname="/referrers"
+      siteSelectorPreserveCustomRange
     >
       <main className="main-content">
         <header className="content-header">
@@ -128,7 +147,10 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
               CSV
             </a>
             <ReportingRangeSelector
-              selectedPreset={rangePreset}
+              customEnabled
+              selectedRange={rangeSelection}
+              resolvedStartDate={selection.startDate}
+              resolvedEndDate={selection.endDate}
               selectedSiteId={site.id}
               firstSiteId={sites[0].id}
               pathname="/referrers"
@@ -143,9 +165,7 @@ export default async function Referrers({ searchParams }: ReferrersProps) {
           <div className="section-heading">
             <div>
               <h2 id="referrers-report-heading">Traffic sources</h2>
-              <p>
-                Session-ranked referrers for {rangePresetMetadata.periodCopy}
-              </p>
+              <p>Session-ranked referrers for {periodCopy}</p>
             </div>
             <span className="updated-label">{timeZone}</span>
           </div>

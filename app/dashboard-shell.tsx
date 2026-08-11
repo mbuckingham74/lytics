@@ -28,6 +28,7 @@ type DashboardShellProps = {
   siteOptions?: SiteSelectorOption[];
   selectedSiteId?: number;
   siteSelectorPathname?: string;
+  siteSelectorPreserveCustomRange?: boolean;
   siteSelectorPreserveRange?: boolean;
 };
 
@@ -39,6 +40,7 @@ export function DashboardShell({
   siteOptions,
   selectedSiteId,
   siteSelectorPathname = "/",
+  siteSelectorPreserveCustomRange = false,
   siteSelectorPreserveRange = true,
 }: DashboardShellProps) {
   return (
@@ -51,6 +53,7 @@ export function DashboardShell({
             options={siteOptions}
             selectedSiteId={selectedSiteId}
             pathname={siteSelectorPathname}
+            preserveCustomRange={siteSelectorPreserveCustomRange}
             preserveRange={siteSelectorPreserveRange}
           />
         ) : (

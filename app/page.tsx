@@ -1,14 +1,16 @@
 import Link from "next/link";
 
+import { createOverviewComparison } from "../lib/overview-comparison";
 import {
+  createOverviewDrillDownHref,
   createOverviewHref,
   overviewRangePresets,
-  resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
   resolveOverviewSite,
 } from "../lib/overview-query";
 import { getOverviewReport } from "../lib/server/overview-report";
 import {
-  createRecentCalendarSelection,
+  createOverviewReportingRange,
   getReportingTimeZone,
 } from "../lib/server/reporting-range";
 import { getRuntimeDatabase } from "../lib/server/runtime-database";
@@ -127,8 +129,14 @@ export default async function Home({ searchParams }: HomeProps) {
 
   const query = await searchParams;
   const site = resolveOverviewSite(sites, query.site);
-  const rangePreset = resolveOverviewRangePreset(query.range);
-  const range = overviewRangePresets[rangePreset];
+  const rangeSelection = resolveOverviewRangeSelection(
+    query.range,
+    query.start,
+    query.end,
+  );
+  const rangeMetadata = rangeSelection.type === "preset"
+    ? overviewRangePresets[rangeSelection.preset]
+    : null;
 
   if (!site) {
     return <EmptyOverview />;
@@ -136,21 +144,22 @@ export default async function Home({ searchParams }: HomeProps) {
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
-  const selection = createRecentCalendarSelection({
+  const selection = createOverviewReportingRange({
+    selection: rangeSelection,
     nowAt,
     timeZone,
-    dayCount: range.dayCount,
   });
   const report = getOverviewReport(database, {
     siteId: site.id,
-    ...selection,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
     timeZone,
     nowAt,
   });
   const csvHref = createOverviewHref({
     siteId: site.id,
     firstSiteId: sites[0].id,
-    rangePreset,
+    rangeSelection,
     pathname: "/api/overview.csv",
   });
   const realtimeEndpoint = createOverviewHref({
@@ -160,12 +169,54 @@ export default async function Home({ searchParams }: HomeProps) {
     pathname: "/api/realtime",
   });
   const overviewMetrics = [
-    { label: "Unique visitors", value: formatCount(report.uniqueVisitors) },
-    { label: "Sessions", value: formatCount(report.sessions) },
-    { label: "Pageviews", value: formatCount(report.pageviews) },
-    { label: "Pages per session", value: formatDecimal(report.pagesPerSession, 2) },
-    { label: "Bounce rate", value: `${formatDecimal(report.bounceRate, 1)}%` },
-    { label: "Session duration", value: formatDuration(report.averageSessionDurationSeconds) },
+    {
+      label: "Unique visitors",
+      value: formatCount(report.uniqueVisitors),
+      comparison: createOverviewComparison(
+        report.uniqueVisitors,
+        report.previousPeriod.uniqueVisitors,
+      ),
+    },
+    {
+      label: "Sessions",
+      value: formatCount(report.sessions),
+      comparison: createOverviewComparison(
+        report.sessions,
+        report.previousPeriod.sessions,
+      ),
+    },
+    {
+      label: "Pageviews",
+      value: formatCount(report.pageviews),
+      comparison: createOverviewComparison(
+        report.pageviews,
+        report.previousPeriod.pageviews,
+      ),
+    },
+    {
+      label: "Pages per session",
+      value: formatDecimal(report.pagesPerSession, 2),
+      comparison: createOverviewComparison(
+        report.pagesPerSession,
+        report.previousPeriod.pagesPerSession,
+      ),
+    },
+    {
+      label: "Bounce rate",
+      value: `${formatDecimal(report.bounceRate, 1)}%`,
+      comparison: createOverviewComparison(
+        report.bounceRate,
+        report.previousPeriod.bounceRate,
+      ),
+    },
+    {
+      label: "Session duration",
+      value: formatDuration(report.averageSessionDurationSeconds),
+      comparison: createOverviewComparison(
+        report.averageSessionDurationSeconds,
+        report.previousPeriod.averageSessionDurationSeconds,
+      ),
+    },
   ];
   const maximumTrendValue = Math.max(
     0,
@@ -181,7 +232,7 @@ export default async function Home({ searchParams }: HomeProps) {
   ];
   const shortDateFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "UTC",
-    ...(range.dayCount > 7
+    ...(selection.dayCount > 7
       ? { month: "short" as const }
       : { weekday: "short" as const }),
     day: "numeric",
@@ -192,6 +243,9 @@ export default async function Home({ searchParams }: HomeProps) {
     month: "long",
     day: "numeric",
   });
+  const periodCopy = rangeMetadata
+    ? rangeMetadata.periodCopy
+    : `${accessibleDateFormatter.format(toUtcCalendarInstant(selection.startDate))}–${accessibleDateFormatter.format(toUtcCalendarInstant(selection.endDate))}`;
   const points = report.dailyUniqueVisitorTrend.map((point, index) => ({
     ...point,
     label: formatTrendDate(shortDateFormatter, point.date),
@@ -215,6 +269,12 @@ export default async function Home({ searchParams }: HomeProps) {
     {
       title: "Referrers",
       columnTitle: "Referrer",
+      href: createOverviewDrillDownHref({
+        view: "referrers",
+        siteId: site.id,
+        firstSiteId: sites[0].id,
+        rangeSelection,
+      }),
       items: report.sessionRankedReferrers.slice(0, 6).map((item) => ({
         label: item.referrer ?? "Direct",
         sessions: item.sessions,
@@ -223,6 +283,12 @@ export default async function Home({ searchParams }: HomeProps) {
     {
       title: "Pages",
       columnTitle: "Page",
+      href: createOverviewDrillDownHref({
+        view: "pages",
+        siteId: site.id,
+        firstSiteId: sites[0].id,
+        rangeSelection,
+      }),
       items: report.sessionRankedPages.slice(0, 6).map((item) => ({
         label: item.path,
         sessions: item.sessions,
@@ -235,6 +301,7 @@ export default async function Home({ searchParams }: HomeProps) {
       activeSection="Overview"
       siteOptions={sites}
       selectedSiteId={site.id}
+      siteSelectorPreserveCustomRange
     >
       <main className="main-content">
         <header className="content-header">
@@ -257,7 +324,10 @@ export default async function Home({ searchParams }: HomeProps) {
               CSV
             </a>
             <ReportingRangeSelector
-              selectedPreset={rangePreset}
+              customEnabled
+              selectedRange={rangeSelection}
+              resolvedStartDate={selection.startDate}
+              resolvedEndDate={selection.endDate}
               selectedSiteId={site.id}
               firstSiteId={sites[0].id}
             />
@@ -268,7 +338,7 @@ export default async function Home({ searchParams }: HomeProps) {
           <div className="section-heading">
             <div>
               <h2 id="overview-heading">Overview</h2>
-              <p>Key activity for {range.periodCopy}</p>
+              <p>Key activity for {periodCopy}</p>
             </div>
             <span className="updated-label">{report.timeZone}</span>
           </div>
@@ -278,7 +348,14 @@ export default async function Home({ searchParams }: HomeProps) {
               <article className="kpi-card" key={metric.label}>
                 <p className="kpi-label">{metric.label}</p>
                 <p className="kpi-value">{metric.value}</p>
-                <p className="kpi-comparison neutral">Selected period</p>
+                <p className="kpi-comparison neutral">
+                  <span aria-hidden="true">
+                    {metric.comparison.visibleText} vs previous period
+                  </span>
+                  <span className="visually-hidden">
+                    {metric.comparison.screenReaderText}
+                  </span>
+                </p>
               </article>
             ))}
           </div>
@@ -363,7 +440,11 @@ export default async function Home({ searchParams }: HomeProps) {
 
               return (
                 <article className="ranking-panel" key={ranking.title}>
-                  <h3>{ranking.title}</h3>
+                  <h3>
+                    <Link className="ranking-title-link" href={ranking.href}>
+                      {ranking.title}
+                    </Link>
+                  </h3>
                   <table className="ranking-table">
                     <thead>
                       <tr>
@@ -384,7 +465,13 @@ export default async function Home({ searchParams }: HomeProps) {
                               }}
                               aria-hidden="true"
                             />
-                            <span className="ranking-label">{item.label}</span>
+                            <Link
+                              className="ranking-label ranking-row-link"
+                              href={ranking.href}
+                              aria-label={`${item.label}; open ${ranking.title} report`}
+                            >
+                              {item.label}
+                            </Link>
                           </td>
                           <td>{formatCount(item.sessions)}</td>
                         </tr>

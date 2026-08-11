@@ -3,11 +3,11 @@ import Link from "next/link";
 import {
   createReportCsvHref,
   overviewRangePresets,
-  resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
   resolveOverviewSite,
 } from "../../lib/overview-query";
 import {
-  createRecentCalendarSelection,
+  createOverviewReportingRange,
   getReportingTimeZone,
 } from "../../lib/server/reporting-range";
 import { getRuntimeDatabase } from "../../lib/server/runtime-database";
@@ -25,6 +25,14 @@ type TechnologyProps = {
 
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
+}
+
+function toUtcCalendarInstant(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const instant = new Date(0);
+  instant.setUTCFullYear(year, month - 1, day);
+  instant.setUTCHours(0, 0, 0, 0);
+  return instant;
 }
 
 function formatDeviceType(deviceType: string | null): string {
@@ -91,8 +99,14 @@ export default async function Technology({ searchParams }: TechnologyProps) {
 
   const query = await searchParams;
   const site = resolveOverviewSite(sites, query.site);
-  const rangePreset = resolveOverviewRangePreset(query.range);
-  const range = overviewRangePresets[rangePreset];
+  const rangeSelection = resolveOverviewRangeSelection(
+    query.range,
+    query.start,
+    query.end,
+  );
+  const rangeMetadata = rangeSelection.type === "preset"
+    ? overviewRangePresets[rangeSelection.preset]
+    : null;
 
   if (!site) {
     return <EmptyTechnology />;
@@ -100,22 +114,32 @@ export default async function Technology({ searchParams }: TechnologyProps) {
 
   const nowAt = new Date();
   const timeZone = getReportingTimeZone();
-  const selection = createRecentCalendarSelection({
+  const selection = createOverviewReportingRange({
+    selection: rangeSelection,
     nowAt,
     timeZone,
-    dayCount: range.dayCount,
   });
   const report = getTechnologyReport(database, {
     siteId: site.id,
-    ...selection,
+    startDate: selection.startDate,
+    endDate: selection.endDate,
     timeZone,
   });
   const csvHref = createReportCsvHref({
     view: "technology",
     siteId: site.id,
     firstSiteId: sites[0].id,
-    rangePreset,
+    rangeSelection,
   });
+  const periodFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const periodCopy = rangeMetadata
+    ? rangeMetadata.periodCopy
+    : `${periodFormatter.format(toUtcCalendarInstant(selection.startDate))}–${periodFormatter.format(toUtcCalendarInstant(selection.endDate))}`;
   const rankings = [
     {
       title: "Browsers",
@@ -161,6 +185,7 @@ export default async function Technology({ searchParams }: TechnologyProps) {
       siteOptions={sites}
       selectedSiteId={site.id}
       siteSelectorPathname="/technology"
+      siteSelectorPreserveCustomRange
     >
       <main className="main-content">
         <header className="content-header">
@@ -179,7 +204,10 @@ export default async function Technology({ searchParams }: TechnologyProps) {
               CSV
             </a>
             <ReportingRangeSelector
-              selectedPreset={rangePreset}
+              customEnabled
+              selectedRange={rangeSelection}
+              resolvedStartDate={selection.startDate}
+              resolvedEndDate={selection.endDate}
               selectedSiteId={site.id}
               firstSiteId={sites[0].id}
               pathname="/technology"
@@ -194,7 +222,7 @@ export default async function Technology({ searchParams }: TechnologyProps) {
           <div className="section-heading">
             <div>
               <h2 id="technology-report-heading">Visitor technology</h2>
-              <p>Distinct visitors for {range.periodCopy}</p>
+              <p>Distinct visitors for {periodCopy}</p>
             </div>
             <span className="updated-label">{report.timeZone}</span>
           </div>

@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import {
   createOverviewHref,
   resolveOverviewRangePreset,
+  resolveOverviewRangeSelection,
 } from "../lib/overview-query";
 
 export type SiteSelectorOption = {
@@ -18,6 +19,7 @@ type SiteSelectorProps = {
   options: SiteSelectorOption[];
   selectedSiteId: number;
   pathname?: string;
+  preserveCustomRange?: boolean;
   preserveRange?: boolean;
 };
 
@@ -25,6 +27,7 @@ export function SiteSelector({
   options,
   selectedSiteId,
   pathname = "/",
+  preserveCustomRange = false,
   preserveRange = true,
 }: SiteSelectorProps) {
   const router = useRouter();
@@ -41,15 +44,25 @@ export function SiteSelector({
   function handleChange(value: string): void {
     setSelectedValue(value);
     const selectedId = Number(value);
-    const rangePreset = preserveRange
-      ? resolveOverviewRangePreset(searchParams.getAll("range"))
-      : "7d";
-    const href = createOverviewHref({
-      siteId: selectedId,
-      firstSiteId: options[0].id,
-      rangePreset,
-      pathname,
-    });
+    const href = preserveRange && preserveCustomRange
+      ? createOverviewHref({
+          siteId: selectedId,
+          firstSiteId: options[0].id,
+          rangeSelection: resolveOverviewRangeSelection(
+            searchParams.getAll("range"),
+            searchParams.getAll("start"),
+            searchParams.getAll("end"),
+          ),
+          pathname,
+        })
+      : createOverviewHref({
+          siteId: selectedId,
+          firstSiteId: options[0].id,
+          rangePreset: preserveRange
+            ? resolveOverviewRangePreset(searchParams.getAll("range"))
+            : "7d",
+          pathname,
+        });
 
     startTransition(() => {
       router.push(href, { scroll: false });
