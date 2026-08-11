@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${LYTICS_BIND_ADDRESS:?Set LYTICS_BIND_ADDRESS to the host address reachable from NPM}:3000:3000"
     restart: unless-stopped
     environment:
       LYTICS_DATABASE_PATH: /data/lytics.sqlite
