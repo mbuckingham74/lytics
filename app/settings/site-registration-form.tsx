@@ -25,6 +25,7 @@ export function SiteRegistrationForm() {
           type="text"
           autoComplete="organization"
           placeholder="Personal site"
+          required
           aria-required="true"
         />
       </div>
@@ -39,10 +40,14 @@ export function SiteRegistrationForm() {
           autoCorrect="off"
           spellCheck="false"
           placeholder="example.com"
+          required
           aria-describedby="site-domain-help"
           aria-required="true"
         />
-        <p id="site-domain-help">Enter the hostname without a protocol or path.</p>
+        <p id="site-domain-help">
+          Enter only a hostname, such as example.com—no protocol, credentials,
+          port, path, query, fragment, wildcard, IP address, or localhost.
+        </p>
       </div>
 
       <button className="register-site-button" type="submit" disabled={isPending}>
