@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${LYTICS_BIND_ADDRESS:?Set LYTICS_BIND_ADDRESS to the host address reachable from NPM}:3000:3000"
+    networks:
+      - npm_network
     restart: unless-stopped
     environment:
       LYTICS_DATABASE_PATH: /data/lytics.sqlite
@@ -19,3 +19,7 @@ services:
 
 volumes:
   lytics-data:
+
+networks:
+  npm_network:
+    external: true

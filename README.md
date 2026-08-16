@@ -15,28 +15,19 @@ host and update it according to your MaxMind account and license terms.
 
 ## Configure and run
 
-Copy the example environment file and edit all three values:
+Copy the example environment file and edit both values:
 
 ```sh
 cp .env.example .env
 ```
 
-`LYTICS_BIND_ADDRESS` must be one specific address on the Lytics host that
-Nginx Proxy Manager (NPM) can reach:
-
-- Use `127.0.0.1` only when NPM can reach the Lytics host's loopback interface.
-  This is appropriate for a proxy running directly on the host, but a proxy in
-  a container generally cannot use its own `127.0.0.1` to reach the host.
-- Otherwise, use one private address assigned to the Lytics host that is
-  reachable from NPM, whether NPM is co-located or on another private host.
-  Restrict TCP port `3000` at the Lytics host firewall to NPM's source address.
-
-Do not bind to `0.0.0.0` or a public interface unless that source-address
-firewall restriction is in place. Port `3000` must not be broadly exposed.
-
 `LYTICS_TIME_ZONE` must be a valid IANA name.
 `LYTICS_GEOLITE2_CITY_HOST_PATH` must be the absolute host path to the GeoLite2
 City file.
+
+Production Lytics and Nginx Proxy Manager must share the external
+`npm_network`. Compose does not publish application port `3000` on the host;
+NPM reaches the service privately at `http://lytics:3000`.
 
 Build and start the application:
 
@@ -108,10 +99,10 @@ docker compose logs -f lytics
 docker compose down
 ```
 
-The dashboard listens on port `3000` of the selected host address. Compose
-stores the SQLite database at `/data/lytics.sqlite` in the named `lytics-data`
-volume. `docker compose down` keeps this volume; `docker compose down -v`
-permanently deletes it.
+The dashboard listens on container port `3000` only. Compose stores the SQLite
+database at `/data/lytics.sqlite` in the named `lytics-data` volume.
+`docker compose down` keeps this volume; `docker compose down -v` permanently
+deletes it.
 
 ## First site and tracker
 
@@ -136,8 +127,7 @@ request path.
 Create an NPM proxy host for `lytics.forkstech.com` with these settings:
 
 - Forward scheme: `http`.
-- Forward hostname/IP: the exact Lytics host address selected in
-  `LYTICS_BIND_ADDRESS`.
+- Forward hostname/IP: `lytics`.
 - Forward port: `3000`.
 - Enable TLS for `lytics.forkstech.com` and redirect public HTTP to HTTPS.
 - Overwrite `X-Real-IP` with the address of the client directly connected to
@@ -185,9 +175,8 @@ Use exact-path matchers (for example, anchored regular expressions
 matchers: paths beneath or alongside these endpoints must continue to use the
 existing authenticated policy.
 
-The selected Lytics host address and its firewall must ensure that only the
-intended NPM path can reach port `3000`. Lytics uses the trusted NPM-provided
-`X-Real-IP` value for geolocation.
+Lytics must remain attached to `npm_network` with no published host port.
+Lytics uses the trusted NPM-provided `X-Real-IP` value for geolocation.
 
 ## Production verification
 

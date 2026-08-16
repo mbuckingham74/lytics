@@ -133,6 +133,21 @@ named_data_volume() {
   printf '%s\n' "$volume_name"
 }
 
+verify_private_ingress() {
+  local container_id=$1
+  local network_names published_ports
+
+  published_ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$container_id")" || \
+    remote_fail 'could not inspect published ports on the existing lytics container.'
+  [[ "$published_ports" == "{}" || "$published_ports" == "null" ]] || \
+    remote_fail 'the existing lytics container publishes a host port.'
+
+  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sort)" || \
+    remote_fail 'could not inspect networks on the existing lytics container.'
+  [[ "$network_names" == "npm_network" ]] || \
+    remote_fail 'the existing lytics container is not isolated to npm_network.'
+}
+
 verify_existing_database() {
   local container_id=$1
 
@@ -212,6 +227,7 @@ geo_path="$({ "${compose[@]}" config --environment || exit 1; } | awk -F= '
 
 container_id="$(running_service_container)"
 data_volume="$(named_data_volume "$container_id")"
+verify_private_ingress "$container_id"
 verify_existing_database "$container_id"
 ensure_owned_stage
 
@@ -397,6 +413,29 @@ named_data_volume() {
   printf '%s\n' "$volume_name"
 }
 
+verify_private_ingress() {
+  local container_id=$1
+  local network_names published_ports
+
+  published_ports="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$container_id")" || {
+    validation_error 'could not inspect published ports on the lytics container.'
+    return 1
+  }
+  [[ "$published_ports" == "{}" || "$published_ports" == "null" ]] || {
+    validation_error 'the lytics container publishes a host port.'
+    return 1
+  }
+
+  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sort)" || {
+    validation_error 'could not inspect networks on the lytics container.'
+    return 1
+  }
+  [[ "$network_names" == "npm_network" ]] || {
+    validation_error 'the lytics container is not isolated to npm_network.'
+    return 1
+  }
+}
+
 verify_existing_database() {
   local container_id=$1
 
@@ -458,6 +497,8 @@ current_data_volume="$(named_data_volume "$current_container")" || \
   deploy_fail 'existing /data named-volume validation failed immediately before build.'
 [[ "$current_data_volume" == "$expected_data_volume" ]] || \
   deploy_fail "data volume changed before build (expected $expected_data_volume, found $current_data_volume)."
+verify_private_ingress "$current_container" || \
+  deploy_fail 'existing private-ingress validation failed immediately before build.'
 verify_existing_database "$current_container" || \
   deploy_fail 'existing SQLite validation failed immediately before build.'
 validate_owned_stage || deploy_fail 'staged build context validation failed before build.'
@@ -488,6 +529,10 @@ if [[ "$replacement_data_volume" != "$expected_data_volume" ]]; then
   show_logs
   deploy_fail \
     "updated lytics service mounted $replacement_data_volume instead of existing volume $expected_data_volume."
+fi
+if ! verify_private_ingress "$replacement_container"; then
+  show_logs
+  deploy_fail 'updated lytics service does not use the private NPM-only ingress contract.'
 fi
 
 probe_passed=false
@@ -573,6 +618,10 @@ if [[ "$final_data_volume" != "$expected_data_volume" ]]; then
   show_logs
   deploy_fail \
     "lytics service no longer mounts existing data volume $expected_data_volume."
+fi
+if ! verify_private_ingress "$final_container"; then
+  show_logs
+  deploy_fail 'lytics service private ingress changed during health verification.'
 fi
 
 "${compose[@]}" ps lytics
