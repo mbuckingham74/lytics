@@ -142,7 +142,7 @@ verify_private_ingress() {
   [[ "$published_ports" == "{}" || "$published_ports" == "null" ]] || \
     remote_fail 'the existing lytics container publishes a host port.'
 
-  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sort)" || \
+  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sed '/^[[:space:]]*$/d' | sort)" || \
     remote_fail 'could not inspect networks on the existing lytics container.'
   [[ "$network_names" == "npm_network" ]] || \
     remote_fail 'the existing lytics container is not isolated to npm_network.'
