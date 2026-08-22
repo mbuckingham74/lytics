@@ -426,7 +426,7 @@ verify_private_ingress() {
     return 1
   }
 
-  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sort)" || {
+  network_names="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id" | sed '/^[[:space:]]*$/d' | sort)" || {
     validation_error 'could not inspect networks on the lytics container.'
     return 1
   }
