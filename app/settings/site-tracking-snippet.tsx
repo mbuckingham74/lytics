@@ -168,6 +168,18 @@ export function RegisteredSiteTableRows({
             <div className="registered-site-copy">
               <strong>{name}</strong>
               <span className="registered-site-domain">{domain}</span>
+              <div className="active-site-inline-actions">
+                <button
+                  className="edit-site-button active-site-inline-edit-button"
+                  type="button"
+                  aria-expanded={editExpanded}
+                  aria-controls={editPanelId}
+                  aria-label={`${editExpanded ? "Hide edit" : "Edit"} for ${name}`}
+                  onClick={toggleEditExpanded}
+                >
+                  {editExpanded ? "Hide edit" : "Edit"}
+                </button>
+              </div>
             </div>
           </div>
         </th>
@@ -221,16 +233,6 @@ export function RegisteredSiteTableRows({
         </td>
         <td className="active-site-action">
           <div className="active-site-management-actions">
-            <button
-              className="edit-site-button"
-              type="button"
-              aria-expanded={editExpanded}
-              aria-controls={editPanelId}
-              aria-label={`${editExpanded ? "Hide edit" : "Edit"} for ${name}`}
-              onClick={toggleEditExpanded}
-            >
-              {editExpanded ? "Hide edit" : "Edit"}
-            </button>
             <button
               className="reset-data-button"
               type="button"

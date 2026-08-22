@@ -1109,6 +1109,15 @@ h1 {
   font-size: 11px;
 }
 
+.active-site-inline-actions {
+  margin-top: 8px;
+}
+
+.active-site-inline-edit-button {
+  min-height: 26px;
+  padding: 0 8px;
+}
+
 .site-tracking-status {
   display: inline-flex;
   align-items: center;

@@ -137,7 +137,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                         <th className="active-site-action" scope="col">
                           Tracking
                         </th>
-                        <th className="active-site-action" scope="col">Data</th>
+                        <th className="active-site-action" scope="col">Manage</th>
                       </tr>
                     </thead>
                     <tbody>
